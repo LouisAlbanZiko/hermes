@@ -93,10 +93,10 @@ pub fn parse(allocator: std.mem.Allocator, reader: anytype) (ParseError || std.m
             const url_param_name = try rb.read_bytes_until_either("=");
             _ = try rb.read(u8);
             const url_param_value = try rb.read_bytes_until_either("& ");
+            try req.url_params.put(url_param_name, url_param_value);
             if (try rb.read(u8) == ' ') {
                 break;
             }
-            try req.url_params.put(url_param_name, url_param_value);
         }
     }
 
