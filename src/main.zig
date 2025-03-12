@@ -37,6 +37,7 @@ pub fn main() !void {
     const ClientData = struct {
         is_open: bool,
         last_commms: i128,
+        ip: server.IP,
     };
     var clients_data = std.ArrayList(ClientData).init(gpa);
     defer clients_data.deinit();
@@ -77,7 +78,9 @@ pub fn main() !void {
                 const client_sock = try posix.accept(server_sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK);
 
                 try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = client_sock, .revents = 0 });
-                try clients_data.append(ClientData{ .is_open = true, .last_commms = std.time.nanoTimestamp() - server_start });
+                try clients_data.append(ClientData{ .is_open = true, .last_commms = std.time.nanoTimestamp() - server_start, .ip = .{ .v4 = @bitCast(addr.addr) } });
+
+                log.info("ACCEPTED Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
 
                 handled_count += 1;
             }
