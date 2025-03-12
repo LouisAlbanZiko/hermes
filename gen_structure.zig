@@ -14,9 +14,21 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
-    if (args.len != 2) fatal("Expected 2 arguments. Got {d}.", .{args.len});
+    const args_count = 3;
+    if (args.len != args_count) fatal("Expected {d} arguments. Got {d}.", .{ args_count, args.len });
 
     const output_file_path = args[1];
+    const scan_dir = args[2];
+
+    var dir = std.fs.cwd().openDir(scan_dir, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => {
+            fatal("Directory '{s}' doesn't exist.", .{scan_dir});
+        },
+        else => {
+            fatal("Failed to open directory '{s}' with Error({s}).", .{ scan_dir, @errorName(err) });
+        },
+    };
+    defer dir.close();
 
     var output_file = std.fs.cwd().createFile(output_file_path, .{}) catch |err| {
         fatal("Unable to open output file '{s}' with Error({s})", .{ output_file_path, @errorName(err) });
@@ -28,21 +40,19 @@ pub fn main() !void {
     try std.fmt.format(w,
         \\const ServerResource = @import("server").ServerResource; 
         \\pub const {s} = &[_]ServerResource{{
-    , .{"www"});
-    try traverse_directory(".", gpa, w);
+    , .{scan_dir});
+    try traverse_directory(&dir, "", gpa, w);
     try std.fmt.format(w,
         \\}};
     , .{});
 }
 
 fn traverse_directory(
-    dir_path: []const u8,
+    dir: *std.fs.Dir,
+    current_path: []const u8,
     allocator: std.mem.Allocator,
     w: anytype,
 ) !void {
-    var dir = try std.fs.cwd().openDir(dir_path, .{ .iterate = true });
-    defer dir.close();
-
     var iter = dir.iterate();
     while (try iter.next()) |entry| {
         switch (entry.kind) {
@@ -53,21 +63,21 @@ fn traverse_directory(
                         w,
                         \\.{{.path="{s}",.value=.{{.handler=@import("{s}/{s}")}}}},
                     ,
-                        .{ std.fs.path.stem(entry.name), dir_path[1..], entry.name },
+                        .{ std.fs.path.stem(entry.name), current_path, entry.name },
                     );
                 } else if (std.mem.eql(u8, extension, ".template")) {
                     try std.fmt.format(
                         w,
                         \\.{{.path="{s}",.value=.{{.template=@embedFile("{s}/{s}")}}}},
                     ,
-                        .{ entry.name, dir_path[1..], entry.name },
+                        .{ entry.name, current_path, entry.name },
                     );
                 } else {
                     try std.fmt.format(
                         w,
                         \\.{{.path="{s}",.value=.{{.file=@embedFile("{s}/{s}")}}}},
                     ,
-                        .{ entry.name, dir_path[1..], entry.name },
+                        .{ entry.name, current_path, entry.name },
                     );
                 }
             },
@@ -78,10 +88,13 @@ fn traverse_directory(
                 ,
                     .{entry.name},
                 );
-                const child_dir_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.name });
-                defer allocator.free(child_dir_path);
+                const new_current_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ current_path, entry.name });
+                defer allocator.free(new_current_path);
 
-                try traverse_directory(child_dir_path, allocator, w);
+                var new_dir = try dir.openDir(entry.name, .{ .iterate = true });
+                defer new_dir.close();
+
+                try traverse_directory(&new_dir, new_current_path, allocator, w);
                 try std.fmt.format(w,
                     \\}}}}}},
                 , .{});

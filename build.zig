@@ -44,8 +44,8 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     const gen_structure_exe = b.addRunArtifact(gen_structure);
-    gen_structure_exe.setCwd(b.path(WEB_DIR));
     const output = gen_structure_exe.addOutputFileArg("structure.zig");
+    gen_structure_exe.addArg(WEB_DIR);
 
     const mod_structure = b.addModule("structure", .{
         .root_source_file = output,
