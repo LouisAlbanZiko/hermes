@@ -23,7 +23,7 @@ pub fn main() !void {
 
     const gpa = gpa_state.allocator();
 
-    const db = try DB.init("db.sqlite");
+    var db = try DB.init("db.sqlite");
     defer db.deinit();
 
     var pollfds = std.ArrayList(posix.pollfd).init(gpa);
