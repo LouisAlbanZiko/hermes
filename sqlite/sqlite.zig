@@ -167,13 +167,8 @@ pub const Statement = struct {
             return err;
         }
     }
-    pub fn finalize(self: Statement) Error!void {
-        const rc = c.sqlite3_finalize(self.stmt);
-        if (rc != c.SQLITE_OK) {
-            const err = error_from_int(rc);
-            log.err("{s}: {s}", .{ @errorName(err), c.sqlite3_errmsg(self.conn.db) });
-            return err;
-        }
+    pub fn finalize(self: Statement) void {
+        _ = c.sqlite3_finalize(self.stmt);
     }
 };
 
