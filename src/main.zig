@@ -99,42 +99,36 @@ pub fn main() !void {
                         defer res.deinit();
 
                         if (std.mem.startsWith(u8, req.path, "/")) {
-                            var path_iter = std.mem.splitScalar(u8, req.path[1..], '/');
-                            if (path_iter.next()) |current_path| {
-                                if (find_resource(current_path, &path_iter, www)) |resource| {
-                                    switch (resource) {
-                                        .directory => |_| {
+                            if (find_resource(req.path[1..], www)) |resource| {
+                                switch (resource) {
+                                    .directory => |_| {
+                                        res.code = ._404_NOT_FOUND;
+                                        log.debug("Found directory at '{s}'", .{req.path});
+                                    },
+                                    .file => |content| {
+                                        res.code = ._200_OK;
+                                        _ = try res.write_body(content);
+                                        log.debug("Found static file at '{s}'", .{req.path});
+                                    },
+                                    .template => |_| {
+                                        res.code = ._404_NOT_FOUND;
+                                        log.debug("Found template at '{s}'", .{req.path});
+                                    },
+                                    .handler => |*handler| {
+                                        if (handler.*[@intFromEnum(req.method)]) |callback| {
+                                            callback(db, &req, &res) catch |err| {
+                                                res.code = ._500_INTERNAL_SERVER_ERROR;
+                                                log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
+                                            };
+                                        } else {
                                             res.code = ._404_NOT_FOUND;
-                                            log.debug("Found directory at '{s}'", .{req.path});
-                                        },
-                                        .file => |content| {
-                                            res.code = ._200_OK;
-                                            _ = try res.write_body(content);
-                                            log.debug("Found static file at '{s}'", .{req.path});
-                                        },
-                                        .template => |_| {
-                                            res.code = ._404_NOT_FOUND;
-                                            log.debug("Found template at '{s}'", .{req.path});
-                                        },
-                                        .handler => |*handler| {
-                                            if (handler.*[@intFromEnum(req.method)]) |callback| {
-                                                callback(db, &req, &res) catch |err| {
-                                                    res.code = ._500_INTERNAL_SERVER_ERROR;
-                                                    log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
-                                                };
-                                            } else {
-                                                res.code = ._404_NOT_FOUND;
-                                                log.debug("Found null callback at '{s}'", .{req.path});
-                                            }
-                                        },
-                                    }
-                                } else {
-                                    res.code = ._404_NOT_FOUND;
-                                    log.debug("No resource found at '{s}'", .{req.path});
+                                            log.debug("Found null callback at '{s}'", .{req.path});
+                                        }
+                                    },
                                 }
                             } else {
                                 res.code = ._404_NOT_FOUND;
-                                log.debug("Request path '{s}' not found.", .{req.path});
+                                log.debug("No resource found at '{s}'", .{req.path});
                             }
                         } else {
                             res.code = ._404_NOT_FOUND;
@@ -227,23 +221,32 @@ fn http_gen_resources(resources: []const ServerResource) HTTP_Directory {
     return HTTP_Directory.initComptime(values);
 }
 
-const PathIterator = std.mem.SplitIterator(u8, .scalar);
-pub fn find_resource(current_path: []const u8, path_iter: *PathIterator, dir: HTTP_Directory) ?HTTP_Resource {
-    std.debug.print("///////////////////////////// {s}", .{current_path});
-    if (dir.get(current_path)) |res| {
-        if (path_iter.next()) |child_path| {
+pub fn find_resource(path: []const u8, root_dir: HTTP_Directory) ?HTTP_Resource {
+    var path_iter = std.mem.splitScalar(u8, path, '/');
+
+    var dir = root_dir;
+    while (path_iter.next()) |current_path| {
+        if (dir.get(current_path)) |res| {
             switch (res) {
                 .directory => |child_dir| {
-                    return find_resource(child_path, path_iter, child_dir);
+                    if (path_iter.peek()) |_| {
+                        dir = child_dir;
+                        continue;
+                    } else {
+                        return null;
+                    }
                 },
                 else => {
-                    return null;
+                    if (path_iter.peek()) |_| {
+                        return null;
+                    } else {
+                        return res;
+                    }
                 },
             }
         } else {
-            return res;
+            return null;
         }
-    } else {
-        return null;
     }
+    unreachable;
 }
