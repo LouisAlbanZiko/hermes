@@ -46,6 +46,7 @@ pub fn build(b: *std.Build) !void {
     const gen_structure_exe = b.addRunArtifact(gen_structure);
     const output = gen_structure_exe.addOutputFileArg("structure.zig");
     gen_structure_exe.addArg(WEB_DIR);
+    gen_structure_exe.has_side_effects = true;
 
     const mod_structure = b.addModule("structure", .{
         .root_source_file = output,
@@ -133,6 +134,7 @@ pub fn build(b: *std.Build) !void {
 
     const run_exe = b.addRunArtifact(exe);
     run_exe.step.dependOn(&gen_structure_exe.step);
+    b.getInstallStep().dependOn(&gen_structure_exe.step);
 
     const run_step = b.step("run", "Run the application");
     run_step.dependOn(&run_exe.step);

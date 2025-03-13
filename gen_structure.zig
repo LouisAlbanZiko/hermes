@@ -37,6 +37,8 @@ pub fn main() !void {
 
     const w = output_file.writer();
 
+    std.debug.print("Outputing structure to file '{s}'\n", .{output_file_path});
+
     try std.fmt.format(w,
         \\const ServerResource = @import("server").ServerResource; 
         \\pub const {s} = &[_]ServerResource{{
