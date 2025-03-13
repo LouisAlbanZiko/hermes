@@ -1,9 +1,9 @@
 const std = @import("std");
 const posix = std.posix;
 
-const http = @import("http");
 const structure = @import("structure");
 const server = @import("server");
+const http = server.http;
 
 const DB = server.DB;
 const Client = server.Client;
@@ -42,7 +42,7 @@ pub fn main() !void {
     var clients_data = std.ArrayList(ClientData).init(gpa);
     defer clients_data.deinit();
 
-    const www = comptime http_gen_resources(structure.www);
+    const www = comptime http.gen_resources(structure.www);
     for (www.keys()) |key| {
         log.info("ADDED '{s}' at '{s}'", .{ @tagName(www.get(key).?), key });
     }
@@ -99,7 +99,7 @@ pub fn main() !void {
                         defer res.deinit();
 
                         if (std.mem.startsWith(u8, req.path, "/")) {
-                            if (find_resource(req.path[1..], www)) |resource| {
+                            if (http.find_resource(req.path[1..], www)) |resource| {
                                 switch (resource) {
                                     .directory => |_| {
                                         res.code = ._404_NOT_FOUND;
@@ -116,7 +116,8 @@ pub fn main() !void {
                                     },
                                     .handler => |*handler| {
                                         if (handler.*[@intFromEnum(req.method)]) |callback| {
-                                            callback(db, &req, &res) catch |err| {
+                                            var context = http.Context{ .db = db };
+                                            callback(&context, &req, &res) catch |err| {
                                                 res.code = ._500_INTERNAL_SERVER_ERROR;
                                                 log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
                                             };
@@ -177,76 +178,4 @@ pub fn main() !void {
             }
         }
     }
-}
-
-const HTTP_Callback = *const fn (DB, *const http.Request, *http.Response) std.mem.Allocator.Error!void;
-const HTTP_ResourceType = ServerResource.Type;
-const HTTP_Directory = std.StaticStringMap(HTTP_Resource);
-const HTTP_Resource = union(HTTP_ResourceType) {
-    directory: HTTP_Directory,
-    handler: [@typeInfo(http.Request.Method).@"enum".fields.len]?HTTP_Callback,
-    template: []const u8,
-    file: []const u8,
-};
-
-fn http_gen_resources(resources: []const ServerResource) HTTP_Directory {
-    var values: [resources.len]struct { []const u8, HTTP_Resource } = undefined;
-
-    inline for (resources, 0..) |resource, index| {
-        switch (resource.value) {
-            .directory => |d| {
-                values[index] = .{ resource.path, .{ .directory = http_gen_resources(d) } };
-            },
-            .handler => |t| {
-                var callbacks: [@typeInfo(http.Method).@"enum".fields.len]?HTTP_Callback = undefined;
-                inline for (@typeInfo(http.Method).@"enum".fields) |field| {
-                    const fn_name = "http_" ++ field.name;
-                    if (std.meta.hasFn(t, fn_name)) {
-                        callbacks[field.value] = @field(t, fn_name);
-                    } else {
-                        callbacks[field.value] = null;
-                    }
-                }
-                values[index] = .{ resource.path, .{ .handler = callbacks } };
-            },
-            .file => |content| {
-                values[index] = .{ resource.path, .{ .file = content } };
-            },
-            .template => |content| {
-                values[index] = .{ resource.path, .{ .template = content } };
-            },
-        }
-    }
-
-    return HTTP_Directory.initComptime(values);
-}
-
-pub fn find_resource(path: []const u8, root_dir: HTTP_Directory) ?HTTP_Resource {
-    var path_iter = std.mem.splitScalar(u8, path, '/');
-
-    var dir = root_dir;
-    while (path_iter.next()) |current_path| {
-        if (dir.get(current_path)) |res| {
-            switch (res) {
-                .directory => |child_dir| {
-                    if (path_iter.peek()) |_| {
-                        dir = child_dir;
-                        continue;
-                    } else {
-                        return null;
-                    }
-                },
-                else => {
-                    if (path_iter.peek()) |_| {
-                        return null;
-                    } else {
-                        return res;
-                    }
-                },
-            }
-        } else {
-            return null;
-        }
-    }
-    unreachable;
 }

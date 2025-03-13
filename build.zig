@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     mod_server.addImport("sqlite", mod_sqlite);
+    mod_server.addImport("http", mod_http);
 
     const gen_structure = b.addExecutable(.{
         .name = "gen_structure",
@@ -128,7 +129,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     exe.root_module.addImport("server", mod_server);
-    exe.root_module.addImport("http", mod_http);
     exe.root_module.addImport("structure", mod_structure);
     b.installArtifact(exe);
 
