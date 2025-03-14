@@ -9,13 +9,31 @@ const DB = server.DB;
 const Client = server.Client;
 const ServerResource = server.ServerResource;
 
+const Protocol = enum { http, tls, https };
+const ProtocolData = union(Protocol) {
+    http,
+    tls: struct {},
+    https: struct {
+        _fill: usize,
+    },
+    pub fn init(protocol: Protocol) ProtocolData {
+        switch (protocol) {
+            .http => return .{ .http = void{} },
+            .tls => return .{ .tls = .{} },
+            .https => return .{ .https = .{ ._fill = 0 } },
+        }
+    }
+};
+
 const log = std.log.scoped(.SERVER);
 
-const PORT = 8080;
+const PORTS = [_]u16{ 8080, 8443 };
+const DEFAULT_PROTOCOL = [_]Protocol{ .http, .tls };
 const CLIENT_TIMEOUT_S = 60;
 
 pub fn main() !void {
-    const client_poll_offset = 1;
+    const client_poll_offset = PORTS.len;
+
     const server_start = std.time.nanoTimestamp();
 
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
@@ -35,9 +53,11 @@ pub fn main() !void {
     }
 
     const ClientData = struct {
+        client: Client,
         is_open: bool,
         last_commms: i128,
         ip: server.IP,
+        protocol: ProtocolData,
     };
     var clients_data = std.ArrayList(ClientData).init(gpa);
     defer clients_data.deinit();
@@ -47,22 +67,28 @@ pub fn main() !void {
         log.info("ADDED '{s}' at '{s}'", .{ @tagName(www.get(key).?), key });
     }
 
-    const server_sock = try posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0);
+    var server_socks: [PORTS.len]posix.socket_t = undefined;
+    for (0..PORTS.len) |port_index| {
+        const port = PORTS[port_index];
 
-    const on: [4]u8 = .{ 0, 0, 0, 1 };
-    try posix.setsockopt(server_sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, &on);
+        const server_sock = try posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0);
 
-    var address = posix.sockaddr.in{
-        .family = posix.AF.INET,
-        .port = ((PORT & 0xFF00) >> 8) | ((PORT & 0x00FF) << 8),
-        .addr = 0,
-    };
-    try posix.bind(server_sock, @ptrCast(&address), @sizeOf(@TypeOf(address)));
-    try posix.listen(server_sock, 32);
+        const on: [4]u8 = .{ 0, 0, 0, 1 };
+        try posix.setsockopt(server_sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, &on);
 
-    try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = server_sock, .revents = 0 });
+        var address = posix.sockaddr.in{
+            .family = posix.AF.INET,
+            .port = ((port & 0xFF00) >> 8) | ((port & 0x00FF) << 8),
+            .addr = 0,
+        };
+        try posix.bind(server_sock, @ptrCast(&address), @sizeOf(@TypeOf(address)));
+        try posix.listen(server_sock, 32);
 
-    log.info("Listening on port {d}.", .{PORT});
+        try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = server_sock, .revents = 0 });
+
+        log.info("Listening on port {d}.", .{port});
+        server_socks[port_index] = server_sock;
+    }
 
     const running = true;
     while (running) {
@@ -72,17 +98,26 @@ pub fn main() !void {
             var handled_count: usize = 0;
             log.info("POLLED! {d} socks are ready.", .{ready_count});
 
-            if (pollfds.items[0].revents & posix.POLL.IN != 0) {
-                var addr: posix.sockaddr.in = undefined;
-                var addr_len: u32 = @sizeOf(@TypeOf(addr));
-                const client_sock = try posix.accept(server_sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK);
+            for (0..server_socks.len) |server_sock_index| {
+                const server_sock = server_socks[server_sock_index];
+                if (pollfds.items[server_sock_index].revents & posix.POLL.IN != 0) {
+                    var addr: posix.sockaddr.in = undefined;
+                    var addr_len: u32 = @sizeOf(@TypeOf(addr));
+                    const client_sock = try posix.accept(server_sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK);
 
-                try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = client_sock, .revents = 0 });
-                try clients_data.append(ClientData{ .is_open = true, .last_commms = std.time.nanoTimestamp() - server_start, .ip = .{ .v4 = @bitCast(addr.addr) } });
+                    try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = client_sock, .revents = 0 });
+                    try clients_data.append(ClientData{
+                        .client = Client{ .sock = client_sock },
+                        .is_open = true,
+                        .last_commms = std.time.nanoTimestamp() - server_start,
+                        .ip = .{ .v4 = @bitCast(addr.addr) },
+                        .protocol = ProtocolData.init(DEFAULT_PROTOCOL[server_sock_index]),
+                    });
 
-                log.info("ACCEPTED Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
+                    log.info("ACCEPTED Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
 
-                handled_count += 1;
+                    handled_count += 1;
+                }
             }
 
             var poll_index: usize = client_poll_offset;
