@@ -8,6 +8,14 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const openssl_dep = b.dependency("openssl", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const libcrypto = openssl_dep.artifact("crypto");
+    const libssl = openssl_dep.artifact("ssl");
+
     const mod_sqlite = b.addModule("sqlite", .{
         .root_source_file = b.path("sqlite/sqlite.zig"),
         .link_libc = true,
@@ -121,15 +129,25 @@ pub fn build(b: *std.Build) !void {
 
         dir_index += 1;
     }
-
-    const exe = b.addExecutable(.{
-        .name = "server_exe",
+    const mod_exe = b.addModule("server_exe", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe.root_module.addImport("server", mod_server);
-    exe.root_module.addImport("structure", mod_structure);
+    mod_exe.addImport("server", mod_server);
+    mod_exe.addImport("structure", mod_structure);
+
+    for (libcrypto.root_module.include_dirs.items) |include_dir| {
+        try mod_exe.include_dirs.append(b.allocator, include_dir);
+    }
+    mod_exe.linkLibrary(libssl);
+    mod_exe.linkLibrary(libcrypto);
+
+    const exe = b.addExecutable(.{
+        .name = "server_exe",
+        .root_module = mod_exe,
+    });
+
     b.installArtifact(exe);
 
     const run_exe = b.addRunArtifact(exe);
