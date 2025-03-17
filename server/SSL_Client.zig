@@ -1,0 +1,43 @@
+const std = @import("std");
+const openssl = @cImport({
+    @cInclude("openssl/ssl.h");
+});
+
+const SSL_Client = @This();
+ssl: ?*openssl.SSL,
+
+pub const ReadError = error{SSL_Read_Error};
+pub fn read(self: SSL_Client, buffer: []u8) ReadError!usize {
+    const socket_log = std.log.scoped(.SSL_IN);
+    var len: usize = undefined;
+    const res = openssl.SSL_read_ex(self.ssl, buffer.ptr, buffer.len, &len);
+    if (res > 0) {
+        socket_log.debug("{s}", .{buffer[0..len]});
+        return len;
+    } else {
+        socket_log.err("Failed to read from SSL_Client with Error: {X:0>4}", .{openssl.SSL_get_error(self.ssl, res)});
+        return error.SSL_Read_Error;
+    }
+}
+pub const Reader = std.io.Reader(SSL_Client, ReadError, read);
+pub fn reader(self: SSL_Client) Reader {
+    return Reader{ .context = self };
+}
+
+pub const WriteError = error{SSL_Write_Error};
+pub fn write(self: SSL_Client, buffer: []const u8) WriteError!usize {
+    const socket_log = std.log.scoped(.SSL_OUT);
+    var len: usize = undefined;
+    const res = openssl.SSL_write_ex(self.ssl, buffer.ptr, buffer.len, &len);
+    if (res > 0) {
+        socket_log.debug("{s}", .{buffer});
+        return len;
+    } else {
+        socket_log.err("Failed to write to SSL_Client with Error: {X:0>4}", .{openssl.SSL_get_error(self.ssl, res)});
+        return error.SSL_Write_Error;
+    }
+}
+pub const Writer = std.io.Writer(SSL_Client, WriteError, write);
+pub fn writer(self: SSL_Client) Writer {
+    return Writer{ .context = self };
+}

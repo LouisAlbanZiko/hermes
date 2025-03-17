@@ -1,28 +1,30 @@
 const std = @import("std");
 const posix = std.posix;
 
+const openssl = @cImport({
+    @cInclude("openssl/ssl.h");
+});
+
 const structure = @import("structure");
 const server = @import("server");
 const http = server.http;
 
 const DB = server.DB;
-const Client = server.Client;
+const TCP_Client = server.TCP_Client;
+const SSL_Client = server.SSL_Client;
 const ServerResource = server.ServerResource;
 
 const Protocol = enum { http, tls, https };
 const ProtocolData = union(Protocol) {
-    http,
-    tls: struct {},
-    https: struct {
-        _fill: usize,
+    http: struct {
+        client: TCP_Client,
     },
-    pub fn init(protocol: Protocol) ProtocolData {
-        switch (protocol) {
-            .http => return .{ .http = void{} },
-            .tls => return .{ .tls = .{} },
-            .https => return .{ .https = .{ ._fill = 0 } },
-        }
-    }
+    tls: struct {
+        client: SSL_Client,
+    },
+    https: struct {
+        client: SSL_Client,
+    },
 };
 
 const log = std.log.scoped(.SERVER);
@@ -44,6 +46,23 @@ pub fn main() !void {
     var db = try DB.init("db.sqlite");
     defer db.deinit();
 
+    const ssl_method = openssl.TLS_server_method();
+    const ssl_ctx: ?*openssl.SSL_CTX = openssl.SSL_CTX_new(ssl_method);
+    if (ssl_ctx == null) {
+        log.err("Failed to create SSL context", .{});
+        return;
+    }
+    defer openssl.SSL_CTX_free(ssl_ctx);
+
+    if (openssl.SSL_CTX_use_certificate_file(ssl_ctx, "localhost.crt", openssl.SSL_FILETYPE_PEM) <= 0) {
+        log.err("Failed to load crt file.", .{});
+        return;
+    }
+    if (openssl.SSL_CTX_use_PrivateKey_file(ssl_ctx, "localhost.key", openssl.SSL_FILETYPE_PEM) <= 0) {
+        log.err("Failed to load private key file.", .{});
+        return;
+    }
+
     var pollfds = std.ArrayList(posix.pollfd).init(gpa);
     defer {
         for (pollfds.items) |pollfd| {
@@ -53,7 +72,6 @@ pub fn main() !void {
     }
 
     const ClientData = struct {
-        client: Client,
         is_open: bool,
         last_commms: i128,
         ip: server.IP,
@@ -105,13 +123,23 @@ pub fn main() !void {
                     var addr_len: u32 = @sizeOf(@TypeOf(addr));
                     const client_sock = try posix.accept(server_sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK);
 
+                    var protocol_data: ProtocolData = undefined;
+                    if (DEFAULT_PROTOCOL[server_sock_index] == .http) {
+                        protocol_data = .{ .http = .{ .client = .{ .sock = client_sock } } };
+                    } else {
+                        const ssl = openssl.SSL_new(ssl_ctx);
+                        if (openssl.SSL_set_fd(ssl, client_sock) <= 0) {
+                            log.err("Failed to set fd of SSL_Client", .{});
+                        }
+                        protocol_data = .{ .tls = .{ .client = .{ .ssl = ssl } } };
+                    }
+
                     try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = client_sock, .revents = 0 });
                     try clients_data.append(ClientData{
-                        .client = Client{ .sock = client_sock },
                         .is_open = true,
                         .last_commms = std.time.nanoTimestamp() - server_start,
                         .ip = .{ .v4 = @bitCast(addr.addr) },
-                        .protocol = ProtocolData.init(DEFAULT_PROTOCOL[server_sock_index]),
+                        .protocol = protocol_data,
                     });
 
                     log.info("ACCEPTED Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
@@ -124,62 +152,131 @@ pub fn main() !void {
             while (handled_count < ready_count and poll_index < pollfds.items.len) {
                 const pollfd = pollfds.items[poll_index];
                 if (pollfd.revents & posix.POLL.IN != 0) {
-                    const client = Client{ .sock = pollfd.fd };
+                    switch (clients_data.items[poll_index - client_poll_offset].protocol) {
+                        .http => |*http_data| {
+                            const client = http_data.client;
+                            if (http.Request.parse(gpa, client.reader())) |const_req| {
+                                var req = const_req;
+                                defer req.deinit();
 
-                    if (http.Request.parse(gpa, client.reader())) |const_req| {
-                        var req = const_req;
-                        defer req.deinit();
+                                var res = try http.Response.init(gpa);
+                                defer res.deinit();
 
-                        var res = try http.Response.init(gpa);
-                        defer res.deinit();
-
-                        if (std.mem.startsWith(u8, req.path, "/")) {
-                            if (http.find_resource(req.path[1..], www)) |resource| {
-                                switch (resource) {
-                                    .directory => |_| {
-                                        res.code = ._404_NOT_FOUND;
-                                        log.debug("Found directory at '{s}'", .{req.path});
-                                    },
-                                    .file => |content| {
-                                        res.code = ._200_OK;
-                                        _ = try res.write_body(content);
-                                        log.debug("Found static file at '{s}'", .{req.path});
-                                    },
-                                    .template => |_| {
-                                        res.code = ._404_NOT_FOUND;
-                                        log.debug("Found template at '{s}'", .{req.path});
-                                    },
-                                    .handler => |*handler| {
-                                        if (handler.*[@intFromEnum(req.method)]) |callback| {
-                                            var context = http.Context{ .db = db };
-                                            callback(&context, &req, &res) catch |err| {
-                                                res.code = ._500_INTERNAL_SERVER_ERROR;
-                                                log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
-                                            };
-                                        } else {
-                                            res.code = ._404_NOT_FOUND;
-                                            log.debug("Found null callback at '{s}'", .{req.path});
+                                if (std.mem.startsWith(u8, req.path, "/")) {
+                                    if (http.find_resource(req.path[1..], www)) |resource| {
+                                        switch (resource) {
+                                            .directory => |_| {
+                                                res.code = ._404_NOT_FOUND;
+                                                log.debug("Found directory at '{s}'", .{req.path});
+                                            },
+                                            .file => |content| {
+                                                res.code = ._200_OK;
+                                                _ = try res.write_body(content);
+                                                log.debug("Found static file at '{s}'", .{req.path});
+                                            },
+                                            .template => |_| {
+                                                res.code = ._404_NOT_FOUND;
+                                                log.debug("Found template at '{s}'", .{req.path});
+                                            },
+                                            .handler => |*handler| {
+                                                if (handler.*[@intFromEnum(req.method)]) |callback| {
+                                                    var context = http.Context{ .db = db };
+                                                    callback(&context, &req, &res) catch |err| {
+                                                        res.code = ._500_INTERNAL_SERVER_ERROR;
+                                                        log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
+                                                    };
+                                                } else {
+                                                    res.code = ._404_NOT_FOUND;
+                                                    log.debug("Found null callback at '{s}'", .{req.path});
+                                                }
+                                            },
                                         }
-                                    },
+                                    } else {
+                                        res.code = ._404_NOT_FOUND;
+                                        log.debug("No resource found at '{s}'", .{req.path});
+                                    }
+                                } else {
+                                    res.code = ._404_NOT_FOUND;
+                                    log.debug("Request path '{s}' doesn't start with '/'.", .{req.path});
                                 }
-                            } else {
-                                res.code = ._404_NOT_FOUND;
-                                log.debug("No resource found at '{s}'", .{req.path});
-                            }
-                        } else {
-                            res.code = ._404_NOT_FOUND;
-                            log.debug("Request path '{s}' doesn't start with '/'.", .{req.path});
-                        }
 
-                        try res.output_to(client.writer());
-                    } else |err| {
-                        switch (err) {
-                            http.Request.ParseError.StreamEmpty => {
-                                log.info("CLOSING {d}. Reason: Stream Empty", .{pollfd.fd});
-                                clients_data.items[poll_index - client_poll_offset].is_open = false;
-                            },
-                            else => return err,
-                        }
+                                try res.output_to(client.writer());
+                            } else |err| {
+                                switch (err) {
+                                    http.Request.ParseError.StreamEmpty => {
+                                        log.info("CLOSING {d}. Reason: Stream Empty", .{pollfd.fd});
+                                        clients_data.items[poll_index - client_poll_offset].is_open = false;
+                                    },
+                                    else => return err,
+                                }
+                            }
+                        },
+                        .https => |*https_data| {
+                            const client = https_data.client;
+                            if (http.Request.parse(gpa, client.reader())) |const_req| {
+                                var req = const_req;
+                                defer req.deinit();
+
+                                var res = try http.Response.init(gpa);
+                                defer res.deinit();
+
+                                if (std.mem.startsWith(u8, req.path, "/")) {
+                                    if (http.find_resource(req.path[1..], www)) |resource| {
+                                        switch (resource) {
+                                            .directory => |_| {
+                                                res.code = ._404_NOT_FOUND;
+                                                log.debug("Found directory at '{s}'", .{req.path});
+                                            },
+                                            .file => |content| {
+                                                res.code = ._200_OK;
+                                                _ = try res.write_body(content);
+                                                log.debug("Found static file at '{s}'", .{req.path});
+                                            },
+                                            .template => |_| {
+                                                res.code = ._404_NOT_FOUND;
+                                                log.debug("Found template at '{s}'", .{req.path});
+                                            },
+                                            .handler => |*handler| {
+                                                if (handler.*[@intFromEnum(req.method)]) |callback| {
+                                                    var context = http.Context{ .db = db };
+                                                    callback(&context, &req, &res) catch |err| {
+                                                        res.code = ._500_INTERNAL_SERVER_ERROR;
+                                                        log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
+                                                    };
+                                                } else {
+                                                    res.code = ._404_NOT_FOUND;
+                                                    log.debug("Found null callback at '{s}'", .{req.path});
+                                                }
+                                            },
+                                        }
+                                    } else {
+                                        res.code = ._404_NOT_FOUND;
+                                        log.debug("No resource found at '{s}'", .{req.path});
+                                    }
+                                } else {
+                                    res.code = ._404_NOT_FOUND;
+                                    log.debug("Request path '{s}' doesn't start with '/'.", .{req.path});
+                                }
+
+                                try res.output_to(client.writer());
+                            } else |err| {
+                                switch (err) {
+                                    http.Request.ParseError.StreamEmpty => {
+                                        log.info("CLOSING {d}. Reason: Stream Empty", .{pollfd.fd});
+                                        clients_data.items[poll_index - client_poll_offset].is_open = false;
+                                    },
+                                    else => return err,
+                                }
+                            }
+                        },
+                        .tls => |*tls_data| {
+                            const res = openssl.SSL_accept(tls_data.client.ssl);
+                            if (res <= 0) {
+                                log.err("Failed to accept SSL client. {d}", .{openssl.SSL_get_error(tls_data.client.ssl, res)});
+                            } else {
+                                clients_data.items[poll_index - client_poll_offset].protocol = .{ .https = .{ .client = tls_data.client } };
+                            }
+                        },
                     }
                     clients_data.items[poll_index - client_poll_offset].last_commms = std.time.nanoTimestamp() - server_start;
 
