@@ -41,3 +41,7 @@ pub const Writer = std.io.Writer(SSL_Client, WriteError, write);
 pub fn writer(self: SSL_Client) Writer {
     return Writer{ .context = self };
 }
+
+pub fn accept_step(self: SSL_Client) bool {
+    return openssl.SSL_accept(self.ssl) > 0;
+}

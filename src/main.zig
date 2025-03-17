@@ -1,10 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
 
-const openssl = @cImport({
-    @cInclude("openssl/ssl.h");
-});
-
 const structure = @import("structure");
 const server = @import("server");
 const http = server.http;
@@ -13,6 +9,7 @@ const DB = server.DB;
 const TCP_Client = server.TCP_Client;
 const SSL_Client = server.SSL_Client;
 const ServerResource = server.ServerResource;
+const SSL_Context = server.SSL_Context;
 
 const Protocol = enum { http, tls, https };
 const ProtocolData = union(Protocol) {
@@ -46,22 +43,8 @@ pub fn main() !void {
     var db = try DB.init("db.sqlite");
     defer db.deinit();
 
-    const ssl_method = openssl.TLS_server_method();
-    const ssl_ctx: ?*openssl.SSL_CTX = openssl.SSL_CTX_new(ssl_method);
-    if (ssl_ctx == null) {
-        log.err("Failed to create SSL context", .{});
-        return;
-    }
-    defer openssl.SSL_CTX_free(ssl_ctx);
-
-    if (openssl.SSL_CTX_use_certificate_file(ssl_ctx, "localhost.crt", openssl.SSL_FILETYPE_PEM) <= 0) {
-        log.err("Failed to load crt file.", .{});
-        return;
-    }
-    if (openssl.SSL_CTX_use_PrivateKey_file(ssl_ctx, "localhost.key", openssl.SSL_FILETYPE_PEM) <= 0) {
-        log.err("Failed to load private key file.", .{});
-        return;
-    }
+    var ssl_ctx = try SSL_Context.init("localhost.crt", "localhost.key");
+    defer ssl_ctx.deinit();
 
     var pollfds = std.ArrayList(posix.pollfd).init(gpa);
     defer {
@@ -127,11 +110,8 @@ pub fn main() !void {
                     if (DEFAULT_PROTOCOL[server_sock_index] == .http) {
                         protocol_data = .{ .http = .{ .client = .{ .sock = client_sock } } };
                     } else {
-                        const ssl = openssl.SSL_new(ssl_ctx);
-                        if (openssl.SSL_set_fd(ssl, client_sock) <= 0) {
-                            log.err("Failed to set fd of SSL_Client", .{});
-                        }
-                        protocol_data = .{ .tls = .{ .client = .{ .ssl = ssl } } };
+                        const client = try ssl_ctx.client_new(client_sock);
+                        protocol_data = .{ .tls = .{ .client = client } };
                     }
 
                     try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = client_sock, .revents = 0 });
@@ -270,10 +250,7 @@ pub fn main() !void {
                             }
                         },
                         .tls => |*tls_data| {
-                            const res = openssl.SSL_accept(tls_data.client.ssl);
-                            if (res <= 0) {
-                                log.err("Failed to accept SSL client. {d}", .{openssl.SSL_get_error(tls_data.client.ssl, res)});
-                            } else {
+                            if (tls_data.client.accept_step()) {
                                 clients_data.items[poll_index - client_poll_offset].protocol = .{ .https = .{ .client = tls_data.client } };
                             }
                         },
@@ -303,6 +280,15 @@ pub fn main() !void {
                 } else {
                     const poll_index = client_index + client_poll_offset;
                     posix.close(pollfds.items[poll_index].fd);
+                    switch (clients_data.items[client_index].protocol) {
+                        .https => |*https_data| {
+                            ssl_ctx.client_free(https_data.client);
+                        },
+                        .tls => |*tls_data| {
+                            ssl_ctx.client_free(tls_data.client);
+                        },
+                        .http => |_| {},
+                    }
                     const pollfd = pollfds.swapRemove(poll_index);
                     _ = clients_data.swapRemove(client_index);
                     log.info("CLOSED {d}", .{pollfd.fd});
