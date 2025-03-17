@@ -8,14 +8,6 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const openssl_dep = b.dependency("openssl", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const libcrypto = openssl_dep.artifact("crypto");
-    const libssl = openssl_dep.artifact("ssl");
-
     const mod_sqlite = b.addModule("sqlite", .{
         .root_source_file = b.path("sqlite/sqlite.zig"),
         .link_libc = true,
@@ -137,11 +129,7 @@ pub fn build(b: *std.Build) !void {
     mod_exe.addImport("server", mod_server);
     mod_exe.addImport("structure", mod_structure);
 
-    for (libcrypto.root_module.include_dirs.items) |include_dir| {
-        try mod_exe.include_dirs.append(b.allocator, include_dir);
-    }
-    mod_exe.linkLibrary(libssl);
-    mod_exe.linkLibrary(libcrypto);
+    mod_exe.linkSystemLibrary("ssl", .{});
 
     const exe = b.addExecutable(.{
         .name = "server_exe",

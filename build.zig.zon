@@ -22,12 +22,7 @@
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
-    .dependencies = .{
-        .openssl = .{
-            .url = "git+https://github.com/kassane/openssl-zig?ref=HEAD#0cbd913c1fb26fcce1b0b31e82d9b880224515ed",
-            .hash = "1220162cad408b6f7eeb6b49733e75ebdb684da77d15bc24d04114b8aaaaa4d7ded6",
-        },
-    },
+    .dependencies = .{},
     .paths = .{
         "build.zig",
         "build.zig.zon",
