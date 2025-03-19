@@ -30,7 +30,7 @@ const PORTS = [_]u16{ 8080, 8443 };
 const DEFAULT_PROTOCOL = [_]Protocol{ .http, .tls };
 const CLIENT_TIMEOUT_S = 60;
 
-pub fn main() !void {
+pub fn main() std.mem.Allocator.Error!void {
     const client_poll_offset = PORTS.len;
 
     const server_start = std.time.nanoTimestamp();
@@ -40,10 +40,16 @@ pub fn main() !void {
 
     const gpa = gpa_state.allocator();
 
-    var db = try DB.init("db.sqlite");
+    var db = DB.init("db.sqlite") catch |err| {
+        log.err("Failed to initialize Database with Error({s})", .{@errorName(err)});
+        return;
+    };
     defer db.deinit();
 
-    var ssl_ctx = try SSL_Context.init("localhost.crt", "localhost.key");
+    var ssl_ctx = SSL_Context.init("localhost.crt", "localhost.key") catch |err| {
+        log.err("Failed to initialize SSL_Context with Error({s})", .{@errorName(err)});
+        return;
+    };
     defer ssl_ctx.deinit();
 
     var pollfds = std.ArrayList(posix.pollfd).init(gpa);
@@ -64,38 +70,55 @@ pub fn main() !void {
     defer clients_data.deinit();
 
     const www = comptime http.gen_resources(structure.www);
-    for (www.keys()) |key| {
-        log.info("ADDED '{s}' at '{s}'", .{ @tagName(www.get(key).?), key });
-    }
 
     var server_socks: [PORTS.len]posix.socket_t = undefined;
     for (0..PORTS.len) |port_index| {
         const port = PORTS[port_index];
 
-        const server_sock = try posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0);
+        const server_sock = posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0) catch |err| {
+            log.err("Failed to open Server Socket at port({d}) with Error({s})", .{ port, @errorName(err) });
+            return;
+        };
 
         const on: [4]u8 = .{ 0, 0, 0, 1 };
-        try posix.setsockopt(server_sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, &on);
+        posix.setsockopt(server_sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, &on) catch |err| {
+            log.err("Failed to make Server Socket at port({d}) Non Blocking with Error({s})", .{ port, @errorName(err) });
+            return;
+        };
 
         var address = posix.sockaddr.in{
             .family = posix.AF.INET,
             .port = ((port & 0xFF00) >> 8) | ((port & 0x00FF) << 8),
             .addr = 0,
         };
-        try posix.bind(server_sock, @ptrCast(&address), @sizeOf(@TypeOf(address)));
-        try posix.listen(server_sock, 32);
+        posix.bind(server_sock, @ptrCast(&address), @sizeOf(@TypeOf(address))) catch |err| {
+            log.err("Failed to bind Server Socket at port({d}) with Error({s})", .{ port, @errorName(err) });
+            return;
+        };
+        posix.listen(server_sock, 32) catch |err| {
+            log.err("Failed to make Server Socket listen on port({d}) with Error({s})", .{ port, @errorName(err) });
+            return;
+        };
 
         try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = server_sock, .revents = 0 });
 
         log.info("Listening on port {d}.", .{port});
         server_socks[port_index] = server_sock;
     }
+    defer {
+        for (server_socks) |server_sock| {
+            posix.close(server_sock);
+        }
+    }
 
     const running = true;
     while (running) {
         {
             log.info("POLLING Server and {d} Clients", .{pollfds.items.len - 1});
-            const ready_count = try posix.poll(pollfds.items, 2 * 1000);
+            const ready_count = posix.poll(pollfds.items, 2 * 1000) catch |err| {
+                log.err("Polling failed with Error({s})", .{@errorName(err)});
+                continue;
+            };
             var handled_count: usize = 0;
             log.info("POLLED! {d} socks are ready.", .{ready_count});
 
@@ -104,13 +127,20 @@ pub fn main() !void {
                 if (pollfds.items[server_sock_index].revents & posix.POLL.IN != 0) {
                     var addr: posix.sockaddr.in = undefined;
                     var addr_len: u32 = @sizeOf(@TypeOf(addr));
-                    const client_sock = try posix.accept(server_sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK);
+                    const client_sock = posix.accept(server_sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
+                        log.err("Failed to accept client on port({d}) with Error({s})", .{ PORTS[server_sock_index], @errorName(err) });
+                        continue;
+                    };
 
                     var protocol_data: ProtocolData = undefined;
                     if (DEFAULT_PROTOCOL[server_sock_index] == .http) {
                         protocol_data = .{ .http = .{ .client = .{ .sock = client_sock } } };
                     } else {
-                        const client = try ssl_ctx.client_new(client_sock);
+                        const client = ssl_ctx.client_new(client_sock) catch |err| {
+                            log.err("Failed to initialize SSL for new client with Error({s})", .{@errorName(err)});
+                            posix.close(client_sock);
+                            continue;
+                        };
                         protocol_data = .{ .tls = .{ .client = client } };
                     }
 
@@ -180,14 +210,20 @@ pub fn main() !void {
                                     log.debug("Request path '{s}' doesn't start with '/'.", .{req.path});
                                 }
 
-                                try res.output_to(client.writer());
+                                res.output_to(client.writer()) catch |err| {
+                                    log.err("Failed to send response to Client({}) with Error({s})", .{ client, @errorName(err) });
+                                    clients_data.items[poll_index - client_poll_offset].is_open = false;
+                                };
                             } else |err| {
                                 switch (err) {
                                     http.Request.ParseError.StreamEmpty => {
                                         log.info("CLOSING {d}. Reason: Stream Empty", .{pollfd.fd});
                                         clients_data.items[poll_index - client_poll_offset].is_open = false;
                                     },
-                                    else => return err,
+                                    else => {
+                                        log.err("CLOSING {d}. Reason: Error({s})", .{ pollfd.fd, @errorName(err) });
+                                        clients_data.items[poll_index - client_poll_offset].is_open = false;
+                                    },
                                 }
                             }
                         },
@@ -238,14 +274,20 @@ pub fn main() !void {
                                     log.debug("Request path '{s}' doesn't start with '/'.", .{req.path});
                                 }
 
-                                try res.output_to(client.writer());
+                                res.output_to(client.writer()) catch |err| {
+                                    log.err("Failed to send response to Client({}) with Error({s})", .{ client, @errorName(err) });
+                                    clients_data.items[poll_index - client_poll_offset].is_open = false;
+                                };
                             } else |err| {
                                 switch (err) {
                                     http.Request.ParseError.StreamEmpty => {
                                         log.info("CLOSING {d}. Reason: Stream Empty", .{pollfd.fd});
                                         clients_data.items[poll_index - client_poll_offset].is_open = false;
                                     },
-                                    else => return err,
+                                    else => {
+                                        log.err("CLOSING {d}. Reason: Error({s})", .{ pollfd.fd, @errorName(err) });
+                                        clients_data.items[poll_index - client_poll_offset].is_open = false;
+                                    },
                                 }
                             }
                         },
