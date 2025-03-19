@@ -42,6 +42,19 @@ pub fn writer(self: SSL_Client) Writer {
     return Writer{ .context = self };
 }
 
-pub fn accept_step(self: SSL_Client) bool {
-    return openssl.SSL_accept(self.ssl) > 0;
+pub const AcceptError = error{ FailedToAcceptClient };
+pub fn accept_step(self: SSL_Client) AcceptError!bool {
+    const ret_code = openssl.SSL_accept(self.ssl);
+    if (ret_code == 0) {
+        return false;
+    } else if (ret_code == 1) {
+        return true;
+    } else {
+        const err_code = openssl.SSL_get_error(self.ssl, ret_code);
+        if (err_code == openssl.SSL_ERROR_WANT_READ or err_code == openssl.SSL_ERROR_WANT_WRITE) {
+            return false;
+        } else {
+            return AcceptError.FailedToAcceptClient;
+        }
+    }
 }

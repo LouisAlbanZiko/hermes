@@ -292,8 +292,13 @@ pub fn main() std.mem.Allocator.Error!void {
                             }
                         },
                         .tls => |*tls_data| {
-                            if (tls_data.client.accept_step()) {
-                                clients_data.items[poll_index - client_poll_offset].protocol = .{ .https = .{ .client = tls_data.client } };
+                            if (tls_data.client.accept_step()) |is_accepted| {
+                                if (is_accepted) {
+                                    clients_data.items[poll_index - client_poll_offset].protocol = .{ .https = .{ .client = tls_data.client } };
+                                }
+                            } else |err| {
+                                log.err("CLOSING {d}. Reason: SSL handshake failed with Error({s})", .{pollfd.fd, @errorName(err) });
+                                clients_data.items[poll_index - client_poll_offset].is_open = false;
                             }
                         },
                     }
