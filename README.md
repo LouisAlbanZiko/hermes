@@ -14,7 +14,7 @@ The exception to this is HTTP Handlers which are exposed at the path without the
 
 ### Dependencies
 - Zig (>=0.14) for building
-- Sqlite was used as a dabatabase (included in the project)
+- Sqlite was used as a database (included in the project)
 - Openssl was used for handling https (linked to as a system library)
 
 ### Building
