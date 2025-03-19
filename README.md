@@ -15,9 +15,10 @@ The exception to this is HTTP Handlers which are exposed at the path without the
 ### Dependencies
 - Zig (>=0.14) for building
 - Sqlite was used as a database (included in the project)
-- Openssl was used for handling https (linked to as a system library)
+- Openssl was used for handling https (linked to as a system library). On debian you can install using `sudo apt install libssl-dev`.
 
 ### Building
 If you have zig installed simply run `zig build` to build and/or `zig build run` to run the server.
 There must be a `www` directory present, otherwise a compile error will be thrown.
+There must be a `localhost.crt` and `localhost.key` files present otherwise the server will not start.
 
