@@ -2,6 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 
 const structure = @import("structure");
+const config = @import("config");
 const server = @import("server");
 const http = server.http;
 
@@ -26,7 +27,7 @@ const ProtocolData = union(Protocol) {
 
 const log = std.log.scoped(.SERVER);
 
-const PORTS = [_]u16{ 8080, 8443 };
+const PORTS = [_]u16{ config.http_port, config.https_port };
 const DEFAULT_PROTOCOL = [_]Protocol{ .http, .tls };
 const CLIENT_TIMEOUT_S = 60;
 
@@ -297,7 +298,7 @@ pub fn main() std.mem.Allocator.Error!void {
                                     clients_data.items[poll_index - client_poll_offset].protocol = .{ .https = .{ .client = tls_data.client } };
                                 }
                             } else |err| {
-                                log.err("CLOSING {d}. Reason: SSL handshake failed with Error({s})", .{pollfd.fd, @errorName(err) });
+                                log.err("CLOSING {d}. Reason: SSL handshake failed with Error({s})", .{ pollfd.fd, @errorName(err) });
                                 clients_data.items[poll_index - client_poll_offset].is_open = false;
                             }
                         },

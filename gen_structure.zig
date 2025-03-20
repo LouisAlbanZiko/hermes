@@ -41,8 +41,8 @@ pub fn main() !void {
 
     try std.fmt.format(w,
         \\const ServerResource = @import("server").ServerResource; 
-        \\pub const {s} = &[_]ServerResource{{
-    , .{scan_dir});
+        \\pub const www = &[_]ServerResource{{
+    , .{});
     try traverse_directory(&dir, "", gpa, w);
     try std.fmt.format(w,
         \\}};

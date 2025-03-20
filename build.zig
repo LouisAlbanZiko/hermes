@@ -2,9 +2,17 @@ const std = @import("std");
 
 const log = std.log.scoped(.BUILD);
 
-const WEB_DIR = "www";
-
 pub fn build(b: *std.Build) !void {
+    const WEB_DIR = b.option([]const u8, "web_dir", "Web Directory") orelse "www";
+    const HTTP_PORT = b.option(u16, "http_port", "Port on which to listen for HTTP Requests") orelse 80;
+    const HTTPS_PORT = b.option(u16, "https_port", "Port on which to listen for HTTPS Requests") orelse 443;
+    const CLIENT_TIMEOUT_S = b.option(usize, "client_timeout_s", "How long in seconds a tcp connection should stay open without communication") orelse 60;
+
+    const config = b.addOptions();
+    config.addOption(u16, "http_port", HTTP_PORT);
+    config.addOption(u16, "https_port", HTTPS_PORT);
+    config.addOption(usize, "client_timeout_s", CLIENT_TIMEOUT_S);
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -128,6 +136,7 @@ pub fn build(b: *std.Build) !void {
     });
     mod_exe.addImport("server", mod_server);
     mod_exe.addImport("structure", mod_structure);
+    mod_exe.addOptions("config", config);
 
     mod_exe.linkSystemLibrary("ssl", .{});
 
