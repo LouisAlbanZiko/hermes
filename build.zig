@@ -3,15 +3,19 @@ const std = @import("std");
 const log = std.log.scoped(.BUILD);
 
 pub fn build(b: *std.Build) !void {
-    const WEB_DIR = b.option([]const u8, "web_dir", "Web Directory") orelse "www";
+    const WEB_DIR = b.option(std.Build.LazyPath, "web_dir", "Web Directory") orelse b.path("example_www");
     const HTTP_PORT = b.option(u16, "http_port", "Port on which to listen for HTTP Requests") orelse 80;
     const HTTPS_PORT = b.option(u16, "https_port", "Port on which to listen for HTTPS Requests") orelse 443;
     const CLIENT_TIMEOUT_S = b.option(usize, "client_timeout_s", "How long in seconds a tcp connection should stay open without communication") orelse 60;
+    const SSL_PRIVATE_KEY = b.option([]const u8, "ssl_private_key", "SSL Private Key, '.key' file name.") orelse "localhost.key";
+    const SSL_PUBLIC_CRT = b.option([]const u8, "ssl_public_crt", "SSL Public Certificate, '.crt' file name.") orelse "localhost.crt";
 
     const config = b.addOptions();
     config.addOption(u16, "http_port", HTTP_PORT);
     config.addOption(u16, "https_port", HTTPS_PORT);
     config.addOption(usize, "client_timeout_s", CLIENT_TIMEOUT_S);
+    config.addOption([]const u8, "ssl_private_key", SSL_PRIVATE_KEY);
+    config.addOption([]const u8, "ssl_public_crt", SSL_PUBLIC_CRT);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -46,89 +50,66 @@ pub fn build(b: *std.Build) !void {
     mod_server.addImport("sqlite", mod_sqlite);
     mod_server.addImport("http", mod_http);
 
-    const gen_structure = b.addExecutable(.{
-        .name = "gen_structure",
+    const install_www_path = "www";
+    const install_www = b.addInstallDirectory(.{
+        .source_dir = WEB_DIR,
+        .install_subdir = install_www_path,
+        .install_dir = .prefix,
+    });
+
+    var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa_state.deinit();
+    const gpa = gpa_state.allocator();
+
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var modules = std.ArrayList(*std.Build.Module).init(gpa);
+    defer modules.deinit();
+
+    var module_paths = std.ArrayList([]const u8).init(gpa);
+    defer module_paths.deinit();
+
+    const web_dir = try WEB_DIR.src_path.owner.build_root.handle.openDir(WEB_DIR.src_path.sub_path, .{ .iterate = true });
+
+    var build_info = BuildInfo{
+        .allocator = arena,
+        .b = b,
+        .web_dir = WEB_DIR,
+        .modules = &modules,
+        .module_paths = &module_paths,
+    };
+    try gen_resources(web_dir, "", &build_info);
+
+    const gen_options = b.addOptions();
+    gen_options.addOption([]const []const u8, "paths", module_paths.items);
+
+    const mod_gen_structure = b.addModule("gen_structure", .{
         .root_source_file = b.path("gen_structure.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const gen_structure_exe = b.addRunArtifact(gen_structure);
+    mod_gen_structure.addOptions("options", gen_options);
+
+    const gen_structure_exe = b.addRunArtifact(b.addExecutable(.{
+        .name = "gen_structure",
+        .root_module = mod_gen_structure,
+    }));
     const output = gen_structure_exe.addOutputFileArg("structure.zig");
-    gen_structure_exe.addArg(WEB_DIR);
     gen_structure_exe.has_side_effects = true;
+    gen_structure_exe.step.dependOn(&install_www.step);
 
     const mod_structure = b.addModule("structure", .{
         .root_source_file = output,
         .target = target,
         .optimize = optimize,
     });
+    for (modules.items, module_paths.items) |mod, path| {
+        mod_structure.addImport(path, mod);
+    }
     mod_structure.addImport("server", mod_server);
 
-    var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa_state.deinit();
-
-    const gpa = gpa_state.allocator();
-
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
-    defer arena_state.deinit();
-
-    const arena = arena_state.allocator();
-
-    var dirs = std.ArrayList([]const u8).init(gpa);
-    try dirs.append(WEB_DIR);
-    defer {
-        for (1..dirs.items.len) |index| {
-            gpa.free(dirs.items[index]);
-        }
-        dirs.deinit();
-    }
-
-    var dir_index: usize = 0;
-    while (dir_index < dirs.items.len) {
-        var dir = try std.fs.cwd().openDir(dirs.items[dir_index], .{ .iterate = true });
-        defer dir.close();
-
-        log.info("Going through dir '{s}'", .{dirs.items[dir_index]});
-
-        var iter = dir.iterate();
-        while (try iter.next()) |entry| {
-            switch (entry.kind) {
-                .directory => {
-                    const new_dir = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dirs.items[dir_index], entry.name });
-                    try dirs.append(new_dir);
-                    log.info("Added dir '{s}' to list", .{new_dir});
-                },
-                .file => {
-                    const mod_path = try std.fmt.allocPrint(arena, "{s}/{s}", .{ dirs.items[dir_index], entry.name });
-                    const mod_name = mod_path[WEB_DIR.len..];
-
-                    const extension = std.fs.path.extension(entry.name);
-                    if (std.mem.eql(u8, extension, ".zig")) {
-                        const mod = b.addModule(mod_name, .{
-                            .root_source_file = b.path(mod_path),
-                            .target = target,
-                            .optimize = optimize,
-                        });
-                        mod.addImport("http", mod_http);
-                        mod.addImport("server", mod_server);
-                        //mod.addImport("ws", mod_ws);
-                        mod_structure.addImport(mod_name, mod);
-                        log.info("Added file '{s}' as a handler.", .{mod_path});
-                    } else {
-                        mod_structure.addAnonymousImport(mod_name, .{
-                            .root_source_file = b.path(mod_path),
-                        });
-                        log.info("Added file '{s}' as an embed.", .{mod_path});
-                    }
-                },
-                else => {
-                    log.warn("Not a file or directory {s}:'{s}'", .{ @tagName(entry.kind), entry.name });
-                },
-            }
-        }
-
-        dir_index += 1;
-    }
     const mod_exe = b.addModule("server_exe", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -144,13 +125,49 @@ pub fn build(b: *std.Build) !void {
         .name = "server_exe",
         .root_module = mod_exe,
     });
-
     b.installArtifact(exe);
 
-    const run_exe = b.addRunArtifact(exe);
-    run_exe.step.dependOn(&gen_structure_exe.step);
     b.getInstallStep().dependOn(&gen_structure_exe.step);
+}
 
-    const run_step = b.step("run", "Run the application");
-    run_step.dependOn(&run_exe.step);
+const BuildInfo = struct {
+    allocator: std.mem.Allocator,
+    b: *std.Build,
+    web_dir: std.Build.LazyPath,
+    modules: *std.ArrayList(*std.Build.Module),
+    module_paths: *std.ArrayList([]const u8),
+};
+
+fn gen_resources(
+    dir: std.fs.Dir,
+    import_path: []const u8,
+    build_info: *BuildInfo,
+) (std.mem.Allocator.Error || std.fs.Dir.Iterator.Error || std.fs.Dir.OpenError)!void {
+    var iter = dir.iterate();
+
+    while (try iter.next()) |entry| {
+        const current_name = try std.fmt.allocPrint(build_info.allocator, "{s}/{s}", .{ import_path, entry.name });
+        switch (entry.kind) {
+            .file => {
+                const module_path = try std.fmt.allocPrint(build_info.allocator, "{s}{s}", .{ build_info.web_dir.src_path.sub_path, current_name });
+                try build_info.modules.append(build_info.b.addModule(current_name, .{
+                    .root_source_file = build_info.web_dir.src_path.owner.path(module_path),
+                }));
+                try build_info.module_paths.append(current_name);
+                log.info("mod_name = '{s}', mod_path = '{s}'", .{ current_name, module_path });
+            },
+            .directory => {
+                const child_import_path = current_name;
+                defer build_info.allocator.free(child_import_path);
+
+                var child_dir = try dir.openDir(entry.name, .{ .iterate = true });
+                defer child_dir.close();
+
+                try gen_resources(child_dir, child_import_path, build_info);
+            },
+            else => {
+                log.err("Not a file or directory {s}:'{s}'", .{ @tagName(entry.kind), entry.name });
+            },
+        }
+    }
 }

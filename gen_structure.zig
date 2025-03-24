@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const options = @import("options");
+
+const log = std.log.scoped(.GEN_STRUCTURE);
+
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();
@@ -9,26 +13,15 @@ pub fn main() !void {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
 
-    _ = arena_state.allocator();
+    const arena = arena_state.allocator();
 
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
-    const args_count = 3;
+    const args_count = 2;
     if (args.len != args_count) fatal("Expected {d} arguments. Got {d}.", .{ args_count, args.len });
 
     const output_file_path = args[1];
-    const scan_dir = args[2];
-
-    var dir = std.fs.cwd().openDir(scan_dir, .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound => {
-            fatal("Directory '{s}' doesn't exist.", .{scan_dir});
-        },
-        else => {
-            fatal("Failed to open directory '{s}' with Error({s}).", .{ scan_dir, @errorName(err) });
-        },
-    };
-    defer dir.close();
 
     var output_file = std.fs.cwd().createFile(output_file_path, .{}) catch |err| {
         fatal("Unable to open output file '{s}' with Error({s})", .{ output_file_path, @errorName(err) });
@@ -37,76 +30,118 @@ pub fn main() !void {
 
     const w = output_file.writer();
 
-    std.debug.print("Outputing structure to file '{s}'\n", .{output_file_path});
+    log.info("Outputing structure to file '{s}'", .{output_file_path});
+
+    var root_dir = BuildResourceDir.init(gpa);
+    defer root_dir.deinit();
+
+    for (options.paths) |path| {
+        log.debug("Generating path '{s}'\n", .{path});
+
+        var current_dir = &root_dir;
+        var iter = std.mem.splitScalar(u8, path, std.fs.path.sep);
+        if (iter.peek()) |first| {
+            if (first.len == 0) {
+                _ = iter.next();
+            }
+        }
+        while (iter.next()) |entry| {
+            var has_br: ?*BuildResource = null;
+            for (current_dir.items) |*br| {
+                if (std.mem.eql(u8, br.path, entry)) {
+                    has_br = br;
+                }
+            }
+
+            if (iter.peek()) |_| {
+                if (has_br) |br| {
+                    switch (br.value) {
+                        .directory => |_| {
+                            current_dir = &br.value.directory;
+                        },
+                        else => {
+                            log.err("Path is not a dir '{s}','{s}'", .{ path, entry });
+                            break;
+                        },
+                    }
+                } else {
+                    const br = BuildResource{
+                        .path = entry,
+                        .value = .{
+                            .directory = BuildResourceDir.init(arena),
+                        },
+                    };
+                    try current_dir.append(br);
+                    current_dir = &current_dir.items[current_dir.items.len - 1].value.directory;
+                    log.info("Added dir '{s}'", .{entry});
+                }
+            } else {
+                const br = BuildResource{
+                    .path = entry,
+                    .value = .{ .file = path },
+                };
+                try current_dir.append(br);
+                log.info("Added file at '{s}'", .{path});
+            }
+        }
+    }
 
     try std.fmt.format(w,
         \\const ServerResource = @import("server").ServerResource; 
         \\pub const www = &[_]ServerResource{{
     , .{});
-    try traverse_directory(&dir, "", gpa, w);
+    for (root_dir.items) |br| {
+        try br.write_zig(w);
+    }
     try std.fmt.format(w,
         \\}};
     , .{});
 }
 
-fn traverse_directory(
-    dir: *std.fs.Dir,
-    current_path: []const u8,
-    allocator: std.mem.Allocator,
-    w: anytype,
-) !void {
-    var iter = dir.iterate();
-    while (try iter.next()) |entry| {
-        switch (entry.kind) {
-            .file => {
-                const extension = std.fs.path.extension(entry.name);
-                if (std.mem.eql(u8, extension, ".zig")) {
-                    try std.fmt.format(
-                        w,
-                        \\.{{.path="{s}",.value=.{{.handler=@import("{s}/{s}")}}}},
-                    ,
-                        .{ std.fs.path.stem(entry.name), current_path, entry.name },
-                    );
-                } else if (std.mem.eql(u8, extension, ".template")) {
-                    try std.fmt.format(
-                        w,
-                        \\.{{.path="{s}",.value=.{{.template=@embedFile("{s}/{s}")}}}},
-                    ,
-                        .{ entry.name, current_path, entry.name },
-                    );
-                } else {
-                    try std.fmt.format(
-                        w,
-                        \\.{{.path="{s}",.value=.{{.file=@embedFile("{s}/{s}")}}}},
-                    ,
-                        .{ entry.name, current_path, entry.name },
-                    );
-                }
-            },
-            .directory => {
-                try std.fmt.format(
-                    w,
-                    \\.{{.path="{s}",.value=.{{.directory=&[_]ServerResource{{
-                ,
-                    .{entry.name},
-                );
-                const new_current_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ current_path, entry.name });
-                defer allocator.free(new_current_path);
-
-                var new_dir = try dir.openDir(entry.name, .{ .iterate = true });
-                defer new_dir.close();
-
-                try traverse_directory(&new_dir, new_current_path, allocator, w);
-                try std.fmt.format(w,
-                    \\}}}}}},
-                , .{});
-            },
-            else => {},
-        }
-    }
-}
-
 fn fatal(comptime format: []const u8, args: anytype) noreturn {
-    std.debug.print(format ++ "\n", args);
+    log.err(format, args);
     std.process.exit(1);
 }
+
+const BuildResourceType = enum { file, directory };
+const BuildResource = struct {
+    path: []const u8,
+    value: union(BuildResourceType) {
+        file: []const u8,
+        directory: BuildResourceDir,
+    },
+    pub fn write_zig(
+        self: @This(),
+        writer: anytype,
+    ) !void {
+        try std.fmt.format(writer, ".{{.path=\"{s}\",.value=.{{", .{self.path});
+        switch (self.value) {
+            .file => |full_path| {
+                var resource_type: []const u8 = undefined;
+                if (std.mem.endsWith(u8, full_path, ".zig")) {
+                    resource_type = "handler";
+                } else if (std.mem.endsWith(u8, full_path, ".template")) {
+                    resource_type = "template";
+                } else {
+                    resource_type = "file";
+                }
+                try std.fmt.format(
+                    writer,
+                    \\.{s}=@embedFile("{s}")
+                ,
+                    .{ resource_type, full_path },
+                );
+            },
+            .directory => |dir| {
+                try writer.writeAll(".directory=&[_]ServerResource{\n");
+                for (dir.items) |br| {
+                    try br.write_zig(writer);
+                }
+                try writer.writeAll("}\n");
+            },
+        }
+        try writer.writeAll("}},\n");
+    }
+};
+
+const BuildResourceDir = std.ArrayList(BuildResource);

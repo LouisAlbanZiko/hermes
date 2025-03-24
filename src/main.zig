@@ -29,7 +29,6 @@ const log = std.log.scoped(.SERVER);
 
 const PORTS = [_]u16{ config.http_port, config.https_port };
 const DEFAULT_PROTOCOL = [_]Protocol{ .http, .tls };
-const CLIENT_TIMEOUT_S = 60;
 
 pub fn main() std.mem.Allocator.Error!void {
     const client_poll_offset = PORTS.len;
@@ -47,7 +46,11 @@ pub fn main() std.mem.Allocator.Error!void {
     };
     defer db.deinit();
 
-    var ssl_ctx = SSL_Context.init("localhost.crt", "localhost.key") catch |err| {
+    const ssl_public_crt = try gpa.dupeZ(u8, config.ssl_public_crt);
+    defer gpa.free(ssl_public_crt);
+    const ssl_private_key = try gpa.dupeZ(u8, config.ssl_private_key);
+    defer gpa.free(ssl_private_key);
+    var ssl_ctx = SSL_Context.init(ssl_public_crt, ssl_private_key) catch |err| {
         log.err("Failed to initialize SSL_Context with Error({s})", .{@errorName(err)});
         return;
     };
@@ -314,7 +317,7 @@ pub fn main() std.mem.Allocator.Error!void {
             const now = std.time.nanoTimestamp() - server_start;
             var client_index: usize = 0;
             while (client_index < clients_data.items.len) {
-                if (clients_data.items[client_index].last_commms + CLIENT_TIMEOUT_S * std.time.ns_per_s < now) {
+                if (clients_data.items[client_index].last_commms + config.client_timeout_s * std.time.ns_per_s < now) {
                     clients_data.items[client_index].is_open = false;
                 }
                 client_index += 1;
