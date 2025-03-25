@@ -27,18 +27,32 @@ const ProtocolData = union(Protocol) {
 
 const log = std.log.scoped(.SERVER);
 
-const PORTS = [_]u16{ config.http_port, config.https_port };
-const DEFAULT_PROTOCOL = [_]Protocol{ .http, .tls };
-
 pub fn main() std.mem.Allocator.Error!void {
-    const client_poll_offset = PORTS.len;
-
     const server_start = std.time.nanoTimestamp();
 
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();
 
     const gpa = gpa_state.allocator();
+
+    var client_poll_offset: usize = 0;
+    var server_ports = std.ArrayList(ServerPort).init(gpa);
+    defer server_ports.deinit();
+
+    var pollfds = std.ArrayList(posix.pollfd).init(gpa);
+    defer {
+        for (pollfds.items) |pollfd| {
+            posix.close(pollfd.fd);
+        }
+        pollfds.deinit();
+    }
+
+    const http_port = open_server_port(config.http_port, .http) catch {
+        return;
+    };
+    try server_ports.append(http_port);
+    try pollfds.append(posix.pollfd{ .fd = http_port.sock, .events = posix.POLL.IN, .revents = 0 });
+    client_poll_offset += 1;
 
     var db = DB.init("db.sqlite") catch |err| {
         log.err("Failed to initialize Database with Error({s})", .{@errorName(err)});
@@ -50,18 +64,27 @@ pub fn main() std.mem.Allocator.Error!void {
     defer gpa.free(ssl_public_crt);
     const ssl_private_key = try gpa.dupeZ(u8, config.ssl_private_key);
     defer gpa.free(ssl_private_key);
-    var ssl_ctx = SSL_Context.init(ssl_public_crt, ssl_private_key) catch |err| {
-        log.err("Failed to initialize SSL_Context with Error({s})", .{@errorName(err)});
-        return;
-    };
-    defer ssl_ctx.deinit();
 
-    var pollfds = std.ArrayList(posix.pollfd).init(gpa);
-    defer {
-        for (pollfds.items) |pollfd| {
-            posix.close(pollfd.fd);
+    var has_https: ?struct {
+        port: ServerPort,
+        ssl: SSL_Context,
+    } = null;
+    if (SSL_Context.init(ssl_public_crt, ssl_private_key)) |ssl| {
+        if (open_server_port(config.https_port, .tls)) |https_port| {
+            try server_ports.append(https_port);
+            try pollfds.append(posix.pollfd{ .fd = https_port.sock, .events = posix.POLL.IN, .revents = 0 });
+            has_https = .{ .port = https_port, .ssl = ssl };
+            client_poll_offset += 1;
+        } else |err| {
+            log.err("Failed to open HTTPS socket with Error({s})", .{@errorName(err)});
         }
-        pollfds.deinit();
+    } else |err| {
+        log.err("Failed to initialize SSL_Context with Error({s}).", .{@errorName(err)});
+    }
+    defer {
+        if (has_https) |*https| {
+            https.ssl.deinit();
+        }
     }
 
     const ClientData = struct {
@@ -75,46 +98,6 @@ pub fn main() std.mem.Allocator.Error!void {
 
     const www = comptime http.gen_resources(structure.www);
 
-    var server_socks: [PORTS.len]posix.socket_t = undefined;
-    for (0..PORTS.len) |port_index| {
-        const port = PORTS[port_index];
-
-        const server_sock = posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0) catch |err| {
-            log.err("Failed to open Server Socket at port({d}) with Error({s})", .{ port, @errorName(err) });
-            return;
-        };
-
-        const on: [4]u8 = .{ 0, 0, 0, 1 };
-        posix.setsockopt(server_sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, &on) catch |err| {
-            log.err("Failed to make Server Socket at port({d}) Non Blocking with Error({s})", .{ port, @errorName(err) });
-            return;
-        };
-
-        var address = posix.sockaddr.in{
-            .family = posix.AF.INET,
-            .port = ((port & 0xFF00) >> 8) | ((port & 0x00FF) << 8),
-            .addr = 0,
-        };
-        posix.bind(server_sock, @ptrCast(&address), @sizeOf(@TypeOf(address))) catch |err| {
-            log.err("Failed to bind Server Socket at port({d}) with Error({s})", .{ port, @errorName(err) });
-            return;
-        };
-        posix.listen(server_sock, 32) catch |err| {
-            log.err("Failed to make Server Socket listen on port({d}) with Error({s})", .{ port, @errorName(err) });
-            return;
-        };
-
-        try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = server_sock, .revents = 0 });
-
-        log.info("Listening on port {d}.", .{port});
-        server_socks[port_index] = server_sock;
-    }
-    defer {
-        for (server_socks) |server_sock| {
-            posix.close(server_sock);
-        }
-    }
-
     const running = true;
     while (running) {
         {
@@ -126,37 +109,53 @@ pub fn main() std.mem.Allocator.Error!void {
             var handled_count: usize = 0;
             log.info("POLLED! {d} socks are ready.", .{ready_count});
 
-            for (0..server_socks.len) |server_sock_index| {
-                const server_sock = server_socks[server_sock_index];
-                if (pollfds.items[server_sock_index].revents & posix.POLL.IN != 0) {
+            // check http port
+            {
+                if (pollfds.items[0].revents & posix.POLL.IN != 0) {
                     var addr: posix.sockaddr.in = undefined;
                     var addr_len: u32 = @sizeOf(@TypeOf(addr));
-                    const client_sock = posix.accept(server_sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
-                        log.err("Failed to accept client on port({d}) with Error({s})", .{ PORTS[server_sock_index], @errorName(err) });
+                    const client_sock = posix.accept(http_port.sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
+                        log.err("Failed to accept client on port({d}) with Error({s})", .{ http_port.port, @errorName(err) });
                         continue;
                     };
-
-                    var protocol_data: ProtocolData = undefined;
-                    if (DEFAULT_PROTOCOL[server_sock_index] == .http) {
-                        protocol_data = .{ .http = .{ .client = .{ .sock = client_sock } } };
-                    } else {
-                        const client = ssl_ctx.client_new(client_sock) catch |err| {
-                            log.err("Failed to initialize SSL for new client with Error({s})", .{@errorName(err)});
-                            posix.close(client_sock);
-                            continue;
-                        };
-                        protocol_data = .{ .tls = .{ .client = client } };
-                    }
 
                     try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = client_sock, .revents = 0 });
                     try clients_data.append(ClientData{
                         .is_open = true,
                         .last_commms = std.time.nanoTimestamp() - server_start,
                         .ip = .{ .v4 = @bitCast(addr.addr) },
-                        .protocol = protocol_data,
+                        .protocol = ProtocolData{ .http = .{ .client = .{ .sock = client_sock } } },
                     });
 
-                    log.info("ACCEPTED Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
+                    log.info("ACCEPTED HTTP Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
+
+                    handled_count += 1;
+                }
+            }
+            if (has_https) |*https| {
+                if (pollfds.items[1].revents & posix.POLL.IN != 0) {
+                    var addr: posix.sockaddr.in = undefined;
+                    var addr_len: u32 = @sizeOf(@TypeOf(addr));
+                    const client_sock = posix.accept(https.port.sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
+                        log.err("Failed to accept client on port({d}) with Error({s})", .{ https.port.port, @errorName(err) });
+                        continue;
+                    };
+
+                    const ssl_client = https.ssl.client_new(client_sock) catch |err| {
+                        log.err("Failed to initialize SSL for new client with Error({s})", .{@errorName(err)});
+                        posix.close(client_sock);
+                        continue;
+                    };
+
+                    try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = client_sock, .revents = 0 });
+                    try clients_data.append(ClientData{
+                        .is_open = true,
+                        .last_commms = std.time.nanoTimestamp() - server_start,
+                        .ip = .{ .v4 = @bitCast(addr.addr) },
+                        .protocol = ProtocolData{ .tls = .{ .client = ssl_client } },
+                    });
+
+                    log.info("ACCEPTED TLS Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
 
                     handled_count += 1;
                 }
@@ -333,10 +332,12 @@ pub fn main() std.mem.Allocator.Error!void {
                     posix.close(pollfds.items[poll_index].fd);
                     switch (clients_data.items[client_index].protocol) {
                         .https => |*https_data| {
-                            ssl_ctx.client_free(https_data.client);
+                            const https = &(has_https orelse unreachable);
+                            https.ssl.client_free(https_data.client);
                         },
                         .tls => |*tls_data| {
-                            ssl_ctx.client_free(tls_data.client);
+                            const https = &(has_https orelse unreachable);
+                            https.ssl.client_free(tls_data.client);
                         },
                         .http => |_| {},
                     }
@@ -347,4 +348,47 @@ pub fn main() std.mem.Allocator.Error!void {
             }
         }
     }
+}
+
+const ServerPort = struct {
+    port: u16,
+    sock: i32,
+    prot: Protocol,
+};
+
+fn open_server_port(port: u16, prot: Protocol) !ServerPort {
+    const server_sock = posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0) catch |err| {
+        log.err("Failed to open Server Socket at port({d}) with Error({s})", .{ port, @errorName(err) });
+        return err;
+    };
+
+    const on: [4]u8 = .{ 0, 0, 0, 1 };
+    posix.setsockopt(server_sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, &on) catch |err| {
+        log.err("Failed to make Server Socket at port({d}) Non Blocking with Error({s})", .{ port, @errorName(err) });
+        return err;
+    };
+
+    var address = posix.sockaddr.in{
+        .family = posix.AF.INET,
+        .port = ((port & 0xFF00) >> 8) | ((port & 0x00FF) << 8),
+        .addr = 0,
+    };
+    posix.bind(server_sock, @ptrCast(&address), @sizeOf(@TypeOf(address))) catch |err| {
+        log.err("Failed to bind Server Socket at port({d}) with Error({s})", .{ port, @errorName(err) });
+        return err;
+    };
+    posix.listen(server_sock, 32) catch |err| {
+        log.err("Failed to make Server Socket listen on port({d}) with Error({s})", .{ port, @errorName(err) });
+        return err;
+    };
+
+    //try pollfds.append(posix.pollfd{ .events = posix.POLL.IN, .fd = server_sock, .revents = 0 });
+
+    log.info("Listening on port {d}.", .{port});
+
+    return ServerPort{
+        .sock = server_sock,
+        .port = port,
+        .prot = prot,
+    };
 }
