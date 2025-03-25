@@ -106,6 +106,9 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     for (modules.items, module_paths.items) |mod, path| {
+        if (std.mem.endsWith(u8, path, ".zig")) {
+            mod.addImport("server", mod_server);
+        }
         mod_structure.addImport(path, mod);
     }
     mod_structure.addImport("server", mod_server);

@@ -104,6 +104,7 @@ fn fatal(comptime format: []const u8, args: anytype) noreturn {
 }
 
 const BuildResourceType = enum { file, directory };
+const BuildResourceDir = std.ArrayList(BuildResource);
 const BuildResource = struct {
     path: []const u8,
     value: union(BuildResourceType) {
@@ -114,34 +115,43 @@ const BuildResource = struct {
         self: @This(),
         writer: anytype,
     ) !void {
-        try std.fmt.format(writer, ".{{.path=\"{s}\",.value=.{{", .{self.path});
         switch (self.value) {
             .file => |full_path| {
                 var resource_type: []const u8 = undefined;
+                var function: []const u8 = undefined;
+                var name: []const u8 = undefined;
                 if (std.mem.endsWith(u8, full_path, ".zig")) {
                     resource_type = "handler";
+                    function = "import";
+                    name = self.path[0 .. self.path.len - ".zig".len];
                 } else if (std.mem.endsWith(u8, full_path, ".template")) {
                     resource_type = "template";
+                    function = "embedFile";
+                    name = self.path;
                 } else {
                     resource_type = "file";
+                    function = "embedFile";
+                    name = self.path;
                 }
                 try std.fmt.format(
                     writer,
-                    \\.{s}=@embedFile("{s}")
+                    \\.{{ .path="{s}",.value=.{{.{s}=@{s}("{s}")}}}},
                 ,
-                    .{ resource_type, full_path },
+                    .{ name, resource_type, function, full_path },
                 );
             },
             .directory => |dir| {
-                try writer.writeAll(".directory=&[_]ServerResource{\n");
+                try std.fmt.format(
+                    writer,
+                    \\.{{.path="{s}",.value=.{{.directory=&[_]ServerResource{{
+                ,
+                    .{self.path},
+                );
                 for (dir.items) |br| {
                     try br.write_zig(writer);
                 }
-                try writer.writeAll("}\n");
+                try writer.writeAll("}}}\n");
             },
         }
-        try writer.writeAll("}},\n");
     }
 };
-
-const BuildResourceDir = std.ArrayList(BuildResource);
