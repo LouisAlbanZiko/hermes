@@ -80,6 +80,8 @@ pub fn build(b: *std.Build) !void {
         .web_dir = WEB_DIR,
         .modules = &modules,
         .module_paths = &module_paths,
+        .target = target,
+        .optimize = optimize,
     };
     try gen_resources(web_dir, "", &build_info);
 
@@ -140,6 +142,8 @@ const BuildInfo = struct {
     web_dir: std.Build.LazyPath,
     modules: *std.ArrayList(*std.Build.Module),
     module_paths: *std.ArrayList([]const u8),
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
 };
 
 fn gen_resources(
@@ -157,6 +161,8 @@ fn gen_resources(
                 if (std.mem.endsWith(u8, current_name, ".zig")) {
                     try build_info.modules.append(build_info.b.addModule(current_name, .{
                         .root_source_file = build_info.web_dir.src_path.owner.path(module_path),
+                        .target = build_info.target,
+                        .optimize = build_info.optimize,
                     }));
                     try build_info.module_paths.append(current_name);
                     log.info("Added handler at '{s}'.", .{current_name});
