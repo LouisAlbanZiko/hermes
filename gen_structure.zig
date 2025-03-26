@@ -36,7 +36,7 @@ pub fn main() !void {
     defer root_dir.deinit();
 
     for (options.paths) |path| {
-        log.debug("Generating path '{s}'\n", .{path});
+        log.debug("Generating path '{s}'", .{path});
 
         var current_dir = &root_dir;
         var iter = std.mem.splitScalar(u8, path, std.fs.path.sep);
