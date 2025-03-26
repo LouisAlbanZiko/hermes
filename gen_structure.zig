@@ -124,10 +124,6 @@ const BuildResource = struct {
                     resource_type = "handler";
                     function = "import";
                     name = self.path[0 .. self.path.len - ".zig".len];
-                } else if (std.mem.endsWith(u8, full_path, ".template")) {
-                    resource_type = "template";
-                    function = "embedFile";
-                    name = self.path;
                 } else {
                     resource_type = "file";
                     function = "embedFile";

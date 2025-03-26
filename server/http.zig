@@ -20,7 +20,6 @@ pub const Directory = std.StaticStringMap(Resource);
 pub const Resource = union(ResourceType) {
     directory: Directory,
     handler: [@typeInfo(http.Request.Method).@"enum".fields.len]?Callback,
-    template: []const u8,
     file: []const u8,
 };
 
@@ -46,9 +45,6 @@ pub fn gen_resources(resources: []const ServerResource) Directory {
             },
             .file => |content| {
                 values[index] = .{ resource.path, .{ .file = content } };
-            },
-            .template => |content| {
-                values[index] = .{ resource.path, .{ .template = content } };
             },
         }
     }

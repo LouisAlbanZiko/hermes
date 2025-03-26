@@ -154,11 +154,21 @@ fn gen_resources(
         switch (entry.kind) {
             .file => {
                 const module_path = try std.fmt.allocPrint(build_info.allocator, "{s}{s}", .{ build_info.web_dir.src_path.sub_path, current_name });
-                try build_info.modules.append(build_info.b.addModule(current_name, .{
-                    .root_source_file = build_info.web_dir.src_path.owner.path(module_path),
-                }));
-                try build_info.module_paths.append(current_name);
-                log.info("mod_name = '{s}', mod_path = '{s}'", .{ current_name, module_path });
+                if (std.mem.endsWith(u8, current_name, ".zig")) {
+                    try build_info.modules.append(build_info.b.addModule(current_name, .{
+                        .root_source_file = build_info.web_dir.src_path.owner.path(module_path),
+                    }));
+                    try build_info.module_paths.append(current_name);
+                    log.info("Added handler at '{s}'.", .{current_name});
+                } else if (std.mem.endsWith(u8, current_name, ".template")) {
+                    log.info("Found template at '{s}'. Skipping!", .{current_name});
+                } else {
+                    try build_info.modules.append(build_info.b.addModule(current_name, .{
+                        .root_source_file = build_info.web_dir.src_path.owner.path(module_path),
+                    }));
+                    try build_info.module_paths.append(current_name);
+                    log.info("Added static file at '{s}'.", .{current_name});
+                }
             },
             .directory => {
                 const child_import_path = current_name;

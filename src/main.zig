@@ -187,10 +187,6 @@ pub fn main() std.mem.Allocator.Error!void {
                                                 _ = try res.write_body(content);
                                                 log.debug("Found static file at '{s}'", .{req.path});
                                             },
-                                            .template => |_| {
-                                                res.code = ._404_NOT_FOUND;
-                                                log.debug("Found template at '{s}'", .{req.path});
-                                            },
                                             .handler => |*handler| {
                                                 if (handler.*[@intFromEnum(req.method)]) |callback| {
                                                     var context = http.Context{ .db = db };
@@ -250,10 +246,6 @@ pub fn main() std.mem.Allocator.Error!void {
                                                 res.code = ._200_OK;
                                                 _ = try res.write_body(content);
                                                 log.debug("Found static file at '{s}'", .{req.path});
-                                            },
-                                            .template => |_| {
-                                                res.code = ._404_NOT_FOUND;
-                                                log.debug("Found template at '{s}'", .{req.path});
                                             },
                                             .handler => |*handler| {
                                                 if (handler.*[@intFromEnum(req.method)]) |callback| {
