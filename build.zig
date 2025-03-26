@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) !void {
     mod_sqlite.addCSourceFile(.{ .file = b.path("sqlite/sqlite3.c"), .flags = &.{"-std=c99"} });
     mod_sqlite.addIncludePath(b.path("sqlite"));
 
-    const util = b.addModule("util", .{
+    const mod_util = b.addModule("util", .{
         .root_source_file = b.path("util/lib.zig"),
         .target = target,
         .optimize = optimize,
@@ -40,13 +40,14 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    mod_http.addImport("util", util);
+    mod_http.addImport("util", mod_util);
 
     const mod_server = b.addModule("server", .{
         .root_source_file = b.path("server/lib.zig"),
         .target = target,
         .optimize = optimize,
     });
+    mod_server.addImport("util", mod_util);
     mod_server.addImport("sqlite", mod_sqlite);
     mod_server.addImport("http", mod_http);
 

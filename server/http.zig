@@ -1,6 +1,6 @@
 const std = @import("std");
 const http = @import("http");
-
+const util = @import("util");
 const DB = @import("DB.zig");
 const ServerResource = @import("ServerResource.zig");
 
@@ -9,6 +9,9 @@ pub const Response = http.Response;
 
 pub const Context = struct {
     db: DB,
+    pub fn template(_: *Context, writer: anytype, comptime content: []const u8, values: anytype) @TypeOf(writer).Error!void {
+        try util.template(writer, content, values);
+    }
 };
 
 pub const Callback = *const fn (*Context, *const http.Request, *http.Response) std.mem.Allocator.Error!void;
