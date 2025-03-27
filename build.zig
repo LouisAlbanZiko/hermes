@@ -51,13 +51,6 @@ pub fn build(b: *std.Build) !void {
     mod_server.addImport("sqlite", mod_sqlite);
     mod_server.addImport("http", mod_http);
 
-    const install_www_path = "www";
-    const install_www = b.addInstallDirectory(.{
-        .source_dir = WEB_DIR,
-        .install_subdir = install_www_path,
-        .install_dir = .prefix,
-    });
-
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
@@ -72,8 +65,6 @@ pub fn build(b: *std.Build) !void {
     var module_paths = std.ArrayList([]const u8).init(gpa);
     defer module_paths.deinit();
 
-    const web_dir = try WEB_DIR.src_path.owner.build_root.handle.openDir(WEB_DIR.src_path.sub_path, .{ .iterate = true });
-
     var build_info = BuildInfo{
         .allocator = arena,
         .b = b,
@@ -83,6 +74,8 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     };
+    var web_dir = try WEB_DIR.src_path.owner.build_root.handle.openDir(WEB_DIR.src_path.sub_path, .{ .iterate = true });
+    defer web_dir.close();
     try gen_resources(web_dir, "", &build_info);
 
     const gen_options = b.addOptions();
@@ -95,13 +88,15 @@ pub fn build(b: *std.Build) !void {
     });
     mod_gen_structure.addOptions("options", gen_options);
 
-    const gen_structure_exe = b.addRunArtifact(b.addExecutable(.{
-        .name = "gen_structure",
+    const gen_structure_exe = b.addExecutable(.{
+        .name = "gen_structure_exe",
         .root_module = mod_gen_structure,
-    }));
-    const output = gen_structure_exe.addOutputFileArg("structure.zig");
-    gen_structure_exe.has_side_effects = true;
-    gen_structure_exe.step.dependOn(&install_www.step);
+    });
+    const gen_structure_artifact = b.addRunArtifact(gen_structure_exe);
+    const output = gen_structure_artifact.addOutputFileArg("structure.zig");
+    gen_structure_artifact.has_side_effects = true;
+
+    std.debug.print("Added gen_structure_exe\n", .{});
 
     const mod_structure = b.addModule("structure", .{
         .root_source_file = output,
@@ -133,7 +128,10 @@ pub fn build(b: *std.Build) !void {
     });
     b.installArtifact(exe);
 
-    b.getInstallStep().dependOn(&gen_structure_exe.step);
+    const run_exe = b.addRunArtifact(exe);
+
+    const run_step = b.step("run", "Run the application");
+    run_step.dependOn(&run_exe.step);
 }
 
 const BuildInfo = struct {
