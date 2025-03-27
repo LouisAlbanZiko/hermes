@@ -27,11 +27,14 @@
     // internet connectivity.
     .dependencies = .{},
     .paths = .{
+        "http",
+        "server",
+        "sqlite",
+        "src",
+        "util",
         "build.zig",
         "build.zig.zon",
-        "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
+        "gen_structure.zig",
+        "README.md",
     },
 }
