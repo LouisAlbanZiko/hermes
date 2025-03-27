@@ -36,8 +36,8 @@ pub fn main() std.mem.Allocator.Error!void {
     const gpa = gpa_state.allocator();
 
     var client_poll_offset: usize = 0;
-    var server_ports = std.ArrayList(ServerPort).init(gpa);
-    defer server_ports.deinit();
+    var server_socks = std.ArrayList(ServerSock).init(gpa);
+    defer server_socks.deinit();
 
     var pollfds = std.ArrayList(posix.pollfd).init(gpa);
     defer {
@@ -47,11 +47,11 @@ pub fn main() std.mem.Allocator.Error!void {
         pollfds.deinit();
     }
 
-    const http_port = open_server_port(config.http_port, .http) catch {
+    const http_sock = open_server_sock(config.http_port, .http) catch {
         return;
     };
-    try server_ports.append(http_port);
-    try pollfds.append(posix.pollfd{ .fd = http_port.sock, .events = posix.POLL.IN, .revents = 0 });
+    try server_socks.append(http_sock);
+    try pollfds.append(posix.pollfd{ .fd = http_sock.sock, .events = posix.POLL.IN, .revents = 0 });
     client_poll_offset += 1;
 
     var db = DB.init("db.sqlite") catch |err| {
@@ -66,14 +66,14 @@ pub fn main() std.mem.Allocator.Error!void {
     defer gpa.free(ssl_private_key);
 
     var has_https: ?struct {
-        port: ServerPort,
+        sock: ServerSock,
         ssl: SSL_Context,
     } = null;
     if (SSL_Context.init(ssl_public_crt, ssl_private_key)) |ssl| {
-        if (open_server_port(config.https_port, .tls)) |https_port| {
-            try server_ports.append(https_port);
-            try pollfds.append(posix.pollfd{ .fd = https_port.sock, .events = posix.POLL.IN, .revents = 0 });
-            has_https = .{ .port = https_port, .ssl = ssl };
+        if (open_server_sock(config.https_port, .tls)) |https_sock| {
+            try server_socks.append(https_sock);
+            try pollfds.append(posix.pollfd{ .fd = https_sock.sock, .events = posix.POLL.IN, .revents = 0 });
+            has_https = .{ .sock = https_sock, .ssl = ssl };
             client_poll_offset += 1;
         } else |err| {
             log.err("Failed to open HTTPS socket with Error({s})", .{@errorName(err)});
@@ -114,8 +114,8 @@ pub fn main() std.mem.Allocator.Error!void {
                 if (pollfds.items[0].revents & posix.POLL.IN != 0) {
                     var addr: posix.sockaddr.in = undefined;
                     var addr_len: u32 = @sizeOf(@TypeOf(addr));
-                    const client_sock = posix.accept(http_port.sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
-                        log.err("Failed to accept client on port({d}) with Error({s})", .{ http_port.port, @errorName(err) });
+                    const client_sock = posix.accept(http_sock.sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
+                        log.err("Failed to accept client on port({d}) with Error({s})", .{ http_sock.port, @errorName(err) });
                         continue;
                     };
 
@@ -136,8 +136,8 @@ pub fn main() std.mem.Allocator.Error!void {
                 if (pollfds.items[1].revents & posix.POLL.IN != 0) {
                     var addr: posix.sockaddr.in = undefined;
                     var addr_len: u32 = @sizeOf(@TypeOf(addr));
-                    const client_sock = posix.accept(https.port.sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
-                        log.err("Failed to accept client on port({d}) with Error({s})", .{ https.port.port, @errorName(err) });
+                    const client_sock = posix.accept(https.sock.sock, @ptrCast(&addr), &addr_len, posix.SOCK.NONBLOCK) catch |err| {
+                        log.err("Failed to accept client on port({d}) with Error({s})", .{ https.sock.port, @errorName(err) });
                         continue;
                     };
 
@@ -342,13 +342,13 @@ pub fn main() std.mem.Allocator.Error!void {
     }
 }
 
-const ServerPort = struct {
+const ServerSock = struct {
     port: u16,
     sock: i32,
     prot: Protocol,
 };
 
-fn open_server_port(port: u16, prot: Protocol) !ServerPort {
+fn open_server_sock(port: u16, prot: Protocol) !ServerSock {
     const server_sock = posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0) catch |err| {
         log.err("Failed to open Server Socket at port({d}) with Error({s})", .{ port, @errorName(err) });
         return err;
@@ -378,7 +378,7 @@ fn open_server_port(port: u16, prot: Protocol) !ServerPort {
 
     log.info("Listening on port {d}.", .{port});
 
-    return ServerPort{
+    return ServerSock{
         .sock = server_sock,
         .port = port,
         .prot = prot,
