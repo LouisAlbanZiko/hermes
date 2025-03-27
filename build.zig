@@ -4,18 +4,6 @@ const log = std.log.scoped(.BUILD);
 
 pub fn build(b: *std.Build) !void {
     const WEB_DIR = b.option(std.Build.LazyPath, "web_dir", "Web Directory") orelse b.path("example_www");
-    const HTTP_PORT = b.option(u16, "http_port", "Port on which to listen for HTTP Requests") orelse 80;
-    const HTTPS_PORT = b.option(u16, "https_port", "Port on which to listen for HTTPS Requests") orelse 443;
-    const CLIENT_TIMEOUT_S = b.option(usize, "client_timeout_s", "How long in seconds a tcp connection should stay open without communication") orelse 60;
-    const SSL_PRIVATE_KEY = b.option([]const u8, "ssl_private_key", "SSL Private Key, '.key' file name.") orelse "localhost.key";
-    const SSL_PUBLIC_CRT = b.option([]const u8, "ssl_public_crt", "SSL Public Certificate, '.crt' file name.") orelse "localhost.crt";
-
-    const config = b.addOptions();
-    config.addOption(u16, "http_port", HTTP_PORT);
-    config.addOption(u16, "https_port", HTTPS_PORT);
-    config.addOption(usize, "client_timeout_s", CLIENT_TIMEOUT_S);
-    config.addOption([]const u8, "ssl_private_key", SSL_PRIVATE_KEY);
-    config.addOption([]const u8, "ssl_public_crt", SSL_PUBLIC_CRT);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -118,7 +106,6 @@ pub fn build(b: *std.Build) !void {
     });
     mod_exe.addImport("server", mod_server);
     mod_exe.addImport("structure", mod_structure);
-    mod_exe.addOptions("config", config);
 
     mod_exe.linkSystemLibrary("ssl", .{});
 

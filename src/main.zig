@@ -2,7 +2,6 @@ const std = @import("std");
 const posix = std.posix;
 
 const structure = @import("structure");
-const config = @import("config");
 const server = @import("server");
 const http = server.http;
 
@@ -11,6 +10,7 @@ const TCP_Client = server.TCP_Client;
 const SSL_Client = server.SSL_Client;
 const ServerResource = server.ServerResource;
 const SSL_Context = server.SSL_Context;
+const Config = server.Config;
 
 const Protocol = enum { http, tls, https };
 const ProtocolData = union(Protocol) {
@@ -35,6 +35,16 @@ pub fn main() std.mem.Allocator.Error!void {
 
     const gpa = gpa_state.allocator();
 
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+
+    const arena = arena_state.allocator();
+
+    const cwd_path = std.fs.cwd().realpathAlloc(arena, ".") catch |err| @errorName(err);
+    std.debug.print("CWD='{s}'\n", .{cwd_path});
+
+    const config = Config.load(arena, "config.zon");
+
     var client_poll_offset: usize = 0;
     var server_socks = std.ArrayList(ServerSock).init(gpa);
     defer server_socks.deinit();
@@ -47,7 +57,7 @@ pub fn main() std.mem.Allocator.Error!void {
         pollfds.deinit();
     }
 
-    const http_sock = open_server_sock(config.http_port, .http) catch {
+    const http_sock = open_server_sock(config.http.port, .http) catch {
         return;
     };
     try server_socks.append(http_sock);
@@ -60,9 +70,9 @@ pub fn main() std.mem.Allocator.Error!void {
     };
     defer db.deinit();
 
-    const ssl_public_crt = try gpa.dupeZ(u8, config.ssl_public_crt);
+    const ssl_public_crt = try gpa.dupeZ(u8, config.https.cert);
     defer gpa.free(ssl_public_crt);
-    const ssl_private_key = try gpa.dupeZ(u8, config.ssl_private_key);
+    const ssl_private_key = try gpa.dupeZ(u8, config.https.key);
     defer gpa.free(ssl_private_key);
 
     var has_https: ?struct {
@@ -70,7 +80,7 @@ pub fn main() std.mem.Allocator.Error!void {
         ssl: SSL_Context,
     } = null;
     if (SSL_Context.init(ssl_public_crt, ssl_private_key)) |ssl| {
-        if (open_server_sock(config.https_port, .tls)) |https_sock| {
+        if (open_server_sock(config.https.port, .tls)) |https_sock| {
             try server_socks.append(https_sock);
             try pollfds.append(posix.pollfd{ .fd = https_sock.sock, .events = posix.POLL.IN, .revents = 0 });
             has_https = .{ .sock = https_sock, .ssl = ssl };
@@ -102,7 +112,7 @@ pub fn main() std.mem.Allocator.Error!void {
     while (running) {
         {
             log.info("POLLING Server and {d} Clients", .{pollfds.items.len - 1});
-            const ready_count = posix.poll(pollfds.items, 2 * 1000) catch |err| {
+            const ready_count = posix.poll(pollfds.items, @intCast(config.poll_timeout_s * std.time.ms_per_s)) catch |err| {
                 log.err("Polling failed with Error({s})", .{@errorName(err)});
                 continue;
             };
