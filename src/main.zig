@@ -2,6 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 
 const structure = @import("structure");
+const options = @import("options");
 const server = @import("server");
 const http = server.http;
 
@@ -26,6 +27,35 @@ const ProtocolData = union(Protocol) {
 };
 
 const log = std.log.scoped(.SERVER);
+
+fn custom_log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
+    if (options.optimize == .Debug) {
+        output_log(std.io.getStdOut().writer(), level, scope, format, args) catch @panic("Failed to log!");
+    } else {
+        const file = std.fs.createFileAbsolute("/var/log/http_server.log", .{ .truncate = false  }) catch |err| {
+            std.debug.print("Failed to open log file with Error({s})\n", .{@errorName(err)});
+            return;
+        };
+        file.seekFromEnd(0) catch |err| {
+            std.debug.print("Failed to seek to end of file with Error({s})\n", .{@errorName(err)});
+            return;
+        };
+        defer file.close();
+        output_log(file.writer(), level, scope, format, args) catch |err| {
+            std.debug.print("Failed to output to lof file with Error({s})\n", .{@errorName(err)});
+            return;
+        };
+    }
+}
+fn output_log(writer: anytype, comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) !void {
+    try std.fmt.format(writer, "[{s}] {s}: ", .{@tagName(scope), @tagName(level)});
+    try std.fmt.format(writer, format, args);
+    try writer.writeAll("\n");
+}
+pub const std_options: std.Options = .{
+    .log_level = blk: { if (options.optimize == .Debug) { break :blk .debug;} else { break :blk .info;} },
+    .logFn = custom_log,
+};
 
 pub fn main() std.mem.Allocator.Error!void {
     const server_start = std.time.nanoTimestamp();

@@ -99,6 +99,9 @@ pub fn build(b: *std.Build) !void {
     }
     mod_structure.addImport("server", mod_server);
 
+    var options = b.addOptions();
+    options.addOption(std.builtin.OptimizeMode, "optimize", optimize);
+
     const mod_exe = b.addModule("server_exe", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -106,6 +109,7 @@ pub fn build(b: *std.Build) !void {
     });
     mod_exe.addImport("server", mod_server);
     mod_exe.addImport("structure", mod_structure);
+    mod_exe.addOptions("options", options);
 
     mod_exe.linkSystemLibrary("ssl", .{});
 
