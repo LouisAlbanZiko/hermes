@@ -32,7 +32,7 @@ fn custom_log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_liter
     if (options.optimize == .Debug) {
         output_log(std.io.getStdOut().writer(), level, scope, format, args) catch @panic("Failed to log!");
     } else {
-        const file = std.fs.createFileAbsolute("/var/log/http_server.log", .{ .truncate = false  }) catch |err| {
+        const file = std.fs.openFileAbsolute("/var/log/" ++ options.exe_name ++ ".log", .{ .mode = .write_only }) catch |err| {
             std.debug.print("Failed to open log file with Error({s})\n", .{@errorName(err)});
             return;
         };

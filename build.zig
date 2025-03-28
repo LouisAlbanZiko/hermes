@@ -4,6 +4,7 @@ const log = std.log.scoped(.BUILD);
 
 pub fn build(b: *std.Build) !void {
     const WEB_DIR = b.option(std.Build.LazyPath, "web_dir", "Web Directory") orelse b.path("example_www");
+    const EXE_NAME = b.option([]const u8, "exe_name", "Name of the executable produced") orelse "server_exe";
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -101,8 +102,9 @@ pub fn build(b: *std.Build) !void {
 
     var options = b.addOptions();
     options.addOption(std.builtin.OptimizeMode, "optimize", optimize);
+    options.addOption([]const u8, "exe_name", EXE_NAME);
 
-    const mod_exe = b.addModule("server_exe", .{
+    const mod_exe = b.addModule(EXE_NAME, .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
