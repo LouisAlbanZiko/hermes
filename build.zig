@@ -116,7 +116,7 @@ pub fn build(b: *std.Build) !void {
     mod_exe.linkSystemLibrary("ssl", .{});
 
     const exe = b.addExecutable(.{
-        .name = "server_exe",
+        .name = EXE_NAME,
         .root_module = mod_exe,
     });
     b.installArtifact(exe);
