@@ -40,10 +40,18 @@ pub fn main() std.mem.Allocator.Error!void {
 
     const arena = arena_state.allocator();
 
-    const cwd_path = std.fs.cwd().realpathAlloc(arena, ".") catch |err| @errorName(err);
-    std.debug.print("CWD='{s}'\n", .{cwd_path});
+    const args = std.process.argsAlloc(gpa) catch |err| {
+        log.err("Failed to retrieve cmd arguments with Error({s})", .{@errorName(err)});
+        return;
+    };
+    defer std.process.argsFree(gpa, args);
 
-    const config = Config.load(arena, "config.zon");
+    var config_file_path: []const u8 = "config.zon";
+    if (args.len >= 2) {
+        config_file_path = args[1];
+    }
+
+    const config = Config.load(arena, config_file_path); 
 
     var client_poll_offset: usize = 0;
     var server_socks = std.ArrayList(ServerSock).init(gpa);
