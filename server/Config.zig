@@ -5,6 +5,7 @@ const log = std.log.scoped(.CONFIG);
 const Config = @This();
 client_timeout_s: usize,
 poll_timeout_s: usize,
+data_dir: ?[]const u8,
 http: struct {
     port: u16,
 },
@@ -15,9 +16,10 @@ https: struct {
 },
 
 pub fn default() Config {
-    return Config {
+    return Config{
         .client_timeout_s = 60,
         .poll_timeout_s = 25,
+        .data_dir = null,
         .http = .{
             .port = 80,
         },
@@ -30,8 +32,8 @@ pub fn default() Config {
 }
 
 pub fn load(arena: std.mem.Allocator, path: []const u8) Config {
-    const config_file = std.fs.cwd().openFile(path, std.fs.File.OpenFlags{.mode = .read_only}) catch |err| {
-        log.warn("Failed to open file at '{s}' with Error({s})", .{path, @errorName(err)});
+    const config_file = std.fs.cwd().openFile(path, std.fs.File.OpenFlags{ .mode = .read_only }) catch |err| {
+        log.warn("Failed to open file at '{s}' with Error({s})", .{ path, @errorName(err) });
         log.info("Loading defaults.", .{});
         return Config.default();
     };
@@ -43,18 +45,17 @@ pub fn load(arena: std.mem.Allocator, path: []const u8) Config {
         8,
         0,
     ) catch |err| {
-        log.warn("Failed to read config file '{s}' with Error({s})", .{path, @errorName(err)});
+        log.warn("Failed to read config file '{s}' with Error({s})", .{ path, @errorName(err) });
         log.info("Loading defaults.", .{});
         return Config.default();
     };
     defer arena.free(content);
 
     const config = std.zon.parse.fromSlice(Config, arena, content, null, .{}) catch |err| {
-        log.warn("Failed to parse config file at '{s}' with Error({s})", .{path, @errorName(err)});
+        log.warn("Failed to parse config file at '{s}' with Error({s})", .{ path, @errorName(err) });
         log.info("Loading defaults.", .{});
         return Config.default();
     };
-    
+
     return config;
 }
-

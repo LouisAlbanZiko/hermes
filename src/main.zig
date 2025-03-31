@@ -232,6 +232,7 @@ pub fn main() std.mem.Allocator.Error!void {
                                 client,
                                 client_data,
                                 gpa,
+                                &config,
                                 www,
                                 db,
                             ) catch |err| {
@@ -245,6 +246,7 @@ pub fn main() std.mem.Allocator.Error!void {
                                 client,
                                 client_data,
                                 gpa,
+                                &config,
                                 www,
                                 db,
                             ) catch |err| {
@@ -355,6 +357,7 @@ fn handle_http_data(
     client: anytype,
     _: *ClientData,
     gpa: std.mem.Allocator,
+    config: *const Config,
     www: http.Directory,
     db: DB,
 ) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || http.Request.ParseError || std.mem.Allocator.Error)!void {
@@ -380,38 +383,76 @@ fn handle_http_data(
         return;
     }
 
-    const resource = http.find_resource(req.path[1..], www) orelse {
-        // look in public folder (later)
-        const message = "No resource found.";
-        try writer.writeAll(std.fmt.comptimePrint("HTTP/1.1 404 Not Found\r\nContent-Length: {d}\r\n\r\n{s}", .{ message.len, message }));
-        return;
-    };
+    const path = req.path[1..];
 
-    switch (resource) {
-        .directory => |_| {
-            res.code = ._404_NOT_FOUND;
-            _ = try res.write_body("Resource is a directory."); // add logic for finding index file?
-            log.debug("Found directory at '{s}'", .{req.path});
-        },
-        .file => |content| {
-            res.code = ._200_OK;
-            _ = try res.write_body(content);
-            log.debug("Found static file at '{s}'", .{req.path});
-        },
-        .handler => |*handler| {
-            if (handler.*[@intFromEnum(req.method)]) |callback| {
-                var context = http.Context{ .db = db };
-                callback(&context, &req, &res) catch |err| {
-                    res.code = ._500_INTERNAL_SERVER_ERROR;
-                    _ = try res.write_body("Handler failed.");
-                    log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
-                };
-            } else {
-                res.code = ._404_NOT_FOUND;
-                _ = try res.write_body("Resource is null handler.");
-                log.debug("Found null callback at '{s}'", .{req.path});
+    blk_handle: {
+        if (http.find_resource(path, www)) |resource| {
+            switch (resource) {
+                .directory => |_| {
+                    res.code = ._404_NOT_FOUND;
+                    _ = try res.write_body("Resource is a directory."); // add logic for finding index file?
+                    log.debug("Found directory at '{s}'", .{req.path});
+                },
+                .file => |content| {
+                    res.code = ._200_OK;
+                    _ = try res.write_body(content);
+                    log.debug("Found static file at '{s}'", .{req.path});
+                },
+                .handler => |*handler| {
+                    if (handler.*[@intFromEnum(req.method)]) |callback| {
+                        var context = http.Context{ .db = db };
+                        callback(&context, &req, &res) catch |err| {
+                            res.code = ._500_INTERNAL_SERVER_ERROR;
+                            _ = try res.write_body("Handler failed.");
+                            log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
+                        };
+                    } else {
+                        res.code = ._404_NOT_FOUND;
+                        _ = try res.write_body("Resource is null handler.");
+                        log.debug("Found null callback at '{s}'", .{req.path});
+                    }
+                },
             }
-        },
+        } else if (config.data_dir) |data_dir| {
+            var dir = std.fs.cwd().openDir(data_dir, .{}) catch |err| {
+                res.code = ._404_NOT_FOUND;
+                _ = try res.write_body("No resource found.");
+                log.info("Could not open data dir with Error({s})", .{@errorName(err)});
+                break :blk_handle;
+            };
+            defer dir.close();
+
+            const file = dir.openFile(path, .{}) catch |err| {
+                res.code = ._404_NOT_FOUND;
+                _ = try res.write_body("No resource found.");
+                log.info("Could not open file at path '{s}' with Error({s})", .{ path, @errorName(err) });
+                break :blk_handle;
+            };
+            defer file.close();
+
+            res.code = ._200_OK;
+
+            var buffer: [1024]u8 = undefined;
+            var read_len = file.read(&buffer) catch |err| {
+                res.code = ._404_NOT_FOUND;
+                _ = try res.write_body("No resource found.");
+                log.info("Could not read from file at path '{s}' with Error({s})", .{ path, @errorName(err) });
+                break :blk_handle;
+            };
+            while (read_len > 0) {
+                _ = try res.write_body(buffer[0..read_len]);
+                read_len = file.read(&buffer) catch |err| {
+                    res.body_len = 0;
+                    res.code = ._404_NOT_FOUND;
+                    _ = try res.write_body("No resource found.");
+                    log.info("Could not read from file at path '{s}' with Error({s})", .{ path, @errorName(err) });
+                    break :blk_handle;
+                };
+            }
+        } else {
+            res.code = ._404_NOT_FOUND;
+            _ = try res.write_body("No resource found.");
+        }
     }
 
     try res.output_to(writer);
