@@ -23,6 +23,8 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    mod_util.addCSourceFile(.{ .file = b.path("util/time_fmt.c"), .flags = &.{"-std=c99"} });
+    mod_util.addIncludePath(b.path("util"));
 
     const mod_http = b.addModule("http", .{
         .root_source_file = b.path("http/lib.zig"),
@@ -111,6 +113,7 @@ pub fn build(b: *std.Build) !void {
     });
     mod_exe.addImport("server", mod_server);
     mod_exe.addImport("structure", mod_structure);
+    mod_exe.addImport("util", mod_util);
     mod_exe.addOptions("options", options);
 
     mod_exe.linkSystemLibrary("ssl", .{});

@@ -4,8 +4,9 @@ const posix = std.posix;
 const structure = @import("structure");
 const options = @import("options");
 const server = @import("server");
-const http = server.http;
+const util = @import("util");
 
+const http = server.http;
 const DB = server.DB;
 const TCP_Client = server.TCP_Client;
 const SSL_Client = server.SSL_Client;
@@ -48,12 +49,22 @@ fn custom_log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_liter
     }
 }
 fn output_log(writer: anytype, comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) !void {
-    try std.fmt.format(writer, "[{s}] {s}: ", .{@tagName(scope), @tagName(level)});
+    var time_buffer: [128:0]u8 = undefined;
+    const timestamp_len = util.timestamp_to_iso8601(std.time.microTimestamp(), &time_buffer, time_buffer.len);
+    time_buffer[timestamp_len] = 0;
+
+    try std.fmt.format(writer, "[{s}][{s}] {s}: ", .{ time_buffer[0..timestamp_len :0], @tagName(scope), @tagName(level) });
     try std.fmt.format(writer, format, args);
     try writer.writeAll("\n");
 }
 pub const std_options: std.Options = .{
-    .log_level = blk: { if (options.optimize == .Debug) { break :blk .debug;} else { break :blk .info;} },
+    .log_level = blk: {
+        if (options.optimize == .Debug) {
+            break :blk .debug;
+        } else {
+            break :blk .info;
+        }
+    },
     .logFn = custom_log,
 };
 
@@ -81,7 +92,7 @@ pub fn main() std.mem.Allocator.Error!void {
         config_file_path = args[1];
     }
 
-    const config = Config.load(arena, config_file_path); 
+    const config = Config.load(arena, config_file_path);
 
     var client_poll_offset: usize = 0;
     var server_socks = std.ArrayList(ServerSock).init(gpa);
