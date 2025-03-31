@@ -53,7 +53,7 @@ pub fn client_new(self: *SSL_Context, client_sock: c_int) !SSL_Client {
         log.err("Failed to set fd of SSL_Client", .{});
         return ClientInitError.SSL_set_fd_Failed;
     }
-    return SSL_Client{ .ssl = ssl };
+    return SSL_Client{ .ssl = ssl, .sock = client_sock };
 }
 
 pub fn client_free(_: *SSL_Context, client: SSL_Client) void {

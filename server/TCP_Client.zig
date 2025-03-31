@@ -4,7 +4,8 @@ const posix = std.posix;
 const TCP_Client = @This();
 sock: posix.socket_t,
 
-pub fn read(self: TCP_Client, buffer: []u8) posix.RecvFromError!usize {
+pub const ReadError = posix.RecvFromError;
+pub fn read(self: TCP_Client, buffer: []u8) ReadError!usize {
     const socket_log = std.log.scoped(.SOCKET_IN);
     const res = posix.recv(self.sock, buffer, 0);
     if (res) |len| {
@@ -19,12 +20,13 @@ pub fn read(self: TCP_Client, buffer: []u8) posix.RecvFromError!usize {
         }
     }
 }
-pub const Reader = std.io.Reader(TCP_Client, posix.RecvFromError, read);
+pub const Reader = std.io.Reader(TCP_Client, ReadError, read);
 pub fn reader(self: TCP_Client) Reader {
     return Reader{ .context = self };
 }
 
-pub fn write(self: TCP_Client, buffer: []const u8) posix.SendError!usize {
+pub const WriteError = posix.SendError;
+pub fn write(self: TCP_Client, buffer: []const u8) WriteError!usize {
     const socket_log = std.log.scoped(.SOCKET_OUT);
     if (posix.send(self.sock, buffer, 0)) |count| {
         socket_log.debug("{s}", .{buffer});
@@ -34,7 +36,7 @@ pub fn write(self: TCP_Client, buffer: []const u8) posix.SendError!usize {
         return err;
     }
 }
-pub const Writer = std.io.Writer(TCP_Client, posix.SendError, write);
+pub const Writer = std.io.Writer(TCP_Client, WriteError, write);
 pub fn writer(self: TCP_Client) Writer {
     return Writer{ .context = self };
 }

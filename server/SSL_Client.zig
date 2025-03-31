@@ -5,6 +5,7 @@ const openssl = @cImport({
 
 const SSL_Client = @This();
 ssl: ?*openssl.SSL,
+sock: i32,
 
 pub const ReadError = error{SSL_Read_Error};
 pub fn read(self: SSL_Client, buffer: []u8) ReadError!usize {
@@ -42,7 +43,7 @@ pub fn writer(self: SSL_Client) Writer {
     return Writer{ .context = self };
 }
 
-pub const AcceptError = error{ FailedToAcceptClient };
+pub const AcceptError = error{FailedToAcceptClient};
 pub fn accept_step(self: SSL_Client) AcceptError!bool {
     const ret_code = openssl.SSL_accept(self.ssl);
     if (ret_code == 0) {
