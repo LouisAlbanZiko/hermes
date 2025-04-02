@@ -146,7 +146,7 @@ const BuildResource = struct {
                 for (dir.items) |br| {
                     try br.write_zig(writer);
                 }
-                try writer.writeAll("}}}\n");
+                try writer.writeAll("}}},\n");
             },
         }
     }
