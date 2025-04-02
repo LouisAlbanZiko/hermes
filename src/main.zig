@@ -390,7 +390,7 @@ fn handle_http_data(
             switch (resource) {
                 .directory => |_| {
                     res.code = ._404_NOT_FOUND;
-                    _ = try res.write_body("Resource is a directory."); // add logic for finding index file?
+                    _ = try res.write_body("Resource is a directory.");
                     log.debug("Found directory at '{s}'", .{req.path});
                 },
                 .file => |content| {

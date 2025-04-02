@@ -63,6 +63,8 @@ pub fn find_resource(path: []const u8, root_dir: Directory) ?Resource {
                     if (path_iter.peek()) |_| {
                         dir = child_dir;
                         continue;
+                    } else if (child_dir.get("index")) |child_res| {
+                        return child_res;
                     } else {
                         return null;
                     }
