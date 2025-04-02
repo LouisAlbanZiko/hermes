@@ -11,6 +11,7 @@ pub fn template(writer: anytype, comptime content: []const u8, values: anytype) 
     comptime var part_start: usize = 0;
     comptime var state: State = .STATIC;
 
+    @setEvalBranchQuota(2000000);
     inline while (index < content.len) {
         const c = content[index];
         switch (state) {
