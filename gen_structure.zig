@@ -96,6 +96,19 @@ pub fn main() !void {
     try std.fmt.format(w,
         \\}};
     , .{});
+
+    try std.fmt.format(w,
+        \\pub const modules = &[_]type{{
+    , .{});
+    for (options.mods) |path| {
+        try std.fmt.format(w,
+            \\@import("{s}"),
+            \\
+        , .{path});
+    }
+    try std.fmt.format(w,
+        \\}};
+    , .{});
 }
 
 fn fatal(comptime format: []const u8, args: anytype) noreturn {
