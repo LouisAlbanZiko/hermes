@@ -176,18 +176,11 @@ pub fn parse_body_form(self: *const Request, allocator: std.mem.Allocator) (Read
     var rb = ReadBuffer.init(self.body);
 
     while (true) {
-        const name = try rb.read_bytes_until('=');
+        const name = rb.read_bytes_until_either("=") catch break;
         _ = try rb.read(u8);
-
-        if (rb.peek() == '&') {
-            continue;
-        }
-
-        const value = rb.read_bytes_until('&') catch rb.data[rb.read_index..];
-
+        const value = rb.read_bytes_until_either("& ") catch rb.data[rb.read_index..];
         try form.put(name, value);
-
-        if (rb.peek() == '&') {
+        if (try rb.read(u8) == ' ') {
             break;
         }
     }
