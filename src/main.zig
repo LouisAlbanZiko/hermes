@@ -157,6 +157,15 @@ pub fn main() std.mem.Allocator.Error!void {
 
     const www = comptime http.gen_resources(structure.www);
 
+    inline for (structure.modules) |mod| {
+        if (std.meta.hasFn(mod, "init")) {
+            mod.init(gpa, &db) catch |err| {
+                log.err("Failed to initialize module with Error({s})", .{@errorName(err)});
+                return;
+            };
+        }
+    }
+
     const running = true;
     while (running) {
         {
@@ -364,6 +373,11 @@ fn handle_http_data(
     const reader = client.reader();
     const writer = client.writer();
 
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+
+    const arena = arena_state.allocator();
+
     var res = http.Response.init(gpa) catch |err| {
         try writer.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
         log.err("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
@@ -400,7 +414,7 @@ fn handle_http_data(
                 },
                 .handler => |*handler| {
                     if (handler.*[@intFromEnum(req.method)]) |callback| {
-                        var context = http.Context{ .db = db };
+                        var context = http.Context{ .db = db, .arena = arena };
                         callback(&context, &req, &res) catch |err| {
                             res.code = ._500_INTERNAL_SERVER_ERROR;
                             _ = try res.write_body("Handler failed.");

@@ -8,6 +8,7 @@ pub const Request = http.Request;
 pub const Response = http.Response;
 
 pub const Context = struct {
+    arena: std.mem.Allocator,
     db: DB,
     pub fn template(_: *Context, writer: anytype, comptime content: []const u8, values: anytype) @TypeOf(writer).Error!void {
         try util.template(writer, content, values);
