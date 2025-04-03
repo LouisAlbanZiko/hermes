@@ -153,8 +153,8 @@ pub const Statement = struct {
             return err;
         }
         var c_slice: []const u8 = undefined;
-        c_slice.len = len;
-        c_slice.ptr = c_blob;
+        c_slice.len = @intCast(len);
+        c_slice.ptr = @ptrCast(c_blob);
         return c_slice;
     }
     pub fn step(self: Statement) Error!Result {
