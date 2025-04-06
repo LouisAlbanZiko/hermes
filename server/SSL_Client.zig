@@ -13,7 +13,7 @@ pub fn read(self: SSL_Client, buffer: []u8) ReadError!usize {
     var len: usize = undefined;
     const res = openssl.SSL_read_ex(self.ssl, buffer.ptr, buffer.len, &len);
     if (res > 0) {
-        socket_log.debug("{s}", .{buffer[0..len]});
+        //socket_log.debug("{s}", .{buffer[0..len]});
         return len;
     } else {
         socket_log.err("Failed to read from SSL_Client with Error: {X:0>4}", .{openssl.SSL_get_error(self.ssl, res)});
@@ -31,7 +31,7 @@ pub fn write(self: SSL_Client, buffer: []const u8) WriteError!usize {
     var len: usize = undefined;
     const res = openssl.SSL_write_ex(self.ssl, buffer.ptr, buffer.len, &len);
     if (res > 0) {
-        socket_log.debug("{s}", .{buffer});
+        //socket_log.debug("{s}", .{buffer});
         return len;
     } else {
         socket_log.err("Failed to write to SSL_Client with Error: {X:0>4}", .{openssl.SSL_get_error(self.ssl, res)});
