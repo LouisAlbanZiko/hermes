@@ -169,13 +169,13 @@ pub fn main() std.mem.Allocator.Error!void {
     const running = true;
     while (running) {
         {
-            log.info("POLLING Server and {d} Clients", .{pollfds.items.len - 1});
+            log.debug("POLLING Server and {d} Clients", .{pollfds.items.len - 1});
             const ready_count = posix.poll(pollfds.items, @intCast(config.poll_timeout_s * std.time.ms_per_s)) catch |err| {
                 log.err("Polling failed with Error({s})", .{@errorName(err)});
                 continue;
             };
             var handled_count: usize = 0;
-            log.info("POLLED! {d} socks are ready.", .{ready_count});
+            log.debug("POLLED! {d} socks are ready.", .{ready_count});
 
             // check http port
             {
