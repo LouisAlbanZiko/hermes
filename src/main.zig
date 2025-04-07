@@ -391,6 +391,8 @@ fn handle_http_data(
     };
     defer req.deinit();
 
+    log.info("Got Request from Client {d}: {s}", .{ client.sock, req });
+
     if (!std.mem.startsWith(u8, req.path, "/")) {
         const message = "Path needs to start with '/'.";
         try writer.writeAll(std.fmt.comptimePrint("HTTP/1.1 404 Not Found\r\nContent-Length: {d}\r\n\r\n{s}", .{ message.len, message }));

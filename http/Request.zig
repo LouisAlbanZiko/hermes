@@ -186,3 +186,12 @@ pub fn parse_body_form(self: *const Request, allocator: std.mem.Allocator) (Read
     }
     return form;
 }
+
+pub fn format(
+    self: @This(),
+    comptime _: []const u8,
+    _: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    try std.fmt.format(writer, "{s} {s}", .{ @tagName(self.method), self.path });
+}
