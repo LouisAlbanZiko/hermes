@@ -57,18 +57,20 @@ pub fn find_resource(path: []const u8, root_dir: Directory) ?Resource {
     var path_iter = std.mem.splitScalar(u8, path, '/');
 
     var dir = root_dir;
-    while (path_iter.next()) |current_path| {
+    var current_path: []const u8 = path_iter.next() orelse "index";
+    if (current_path.len == 0) {
+        current_path = "index";
+    }
+    while (true) {
         if (dir.get(current_path)) |res| {
             switch (res) {
                 .directory => |child_dir| {
-                    if (path_iter.peek()) |_| {
-                        dir = child_dir;
-                        continue;
-                    } else if (child_dir.get("index")) |child_res| {
-                        return child_res;
-                    } else {
-                        return null;
+                    dir = child_dir;
+                    current_path = path_iter.next() orelse "index";
+                    if (current_path.len == 0) {
+                        current_path = "index";
                     }
+                    continue;
                 },
                 else => {
                     if (path_iter.peek()) |_| {
