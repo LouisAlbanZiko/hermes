@@ -1,12 +1,13 @@
 .{
-	.client_timeout_s = 120,
-	.poll_timeout_s = 25,
-	.http = .{
-		.port = 8080,
-	},
-	.https = .{
-		.port = 8443,
-		.cert = "localhost.crt",
-		.key = "localhost.key",
-	},
+    .client_timeout_s = 120,
+    .poll_timeout_s = 25,
+    .data_dir = "example_www",
+    .http = .{
+        .port = 8080,
+    },
+    .https = .{
+        .port = 8443,
+        .cert = "localhost.crt",
+        .key = "localhost.key",
+    },
 }
