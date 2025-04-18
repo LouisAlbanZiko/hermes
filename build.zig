@@ -20,28 +20,20 @@ pub fn build(b: *std.Build) !void {
     mod_sqlite.addIncludePath(b.path("sqlite"));
 
     const mod_util = b.addModule("util", .{
-        .root_source_file = b.path("util/lib.zig"),
+        .root_source_file = b.path("util/root.zig"),
         .target = target,
         .optimize = optimize,
     });
     mod_util.addCSourceFile(.{ .file = b.path("util/time_fmt.c"), .flags = &.{"-std=c99"} });
     mod_util.addIncludePath(b.path("util"));
 
-    const mod_http = b.addModule("http", .{
-        .root_source_file = b.path("http/lib.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    mod_http.addImport("util", mod_util);
-
     const mod_server = b.addModule("server", .{
-        .root_source_file = b.path("server/lib.zig"),
+        .root_source_file = b.path("server/root.zig"),
         .target = target,
         .optimize = optimize,
     });
     mod_server.addImport("util", mod_util);
     mod_server.addImport("sqlite", mod_sqlite);
-    mod_server.addImport("http", mod_http);
 
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();

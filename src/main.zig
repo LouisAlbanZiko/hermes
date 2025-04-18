@@ -7,7 +7,7 @@ const server = @import("server");
 const util = @import("util");
 
 const http = server.http;
-const DB = server.DB;
+const Database = server.Database;
 const TCP_Client = server.TCP_Client;
 const SSL_Client = server.SSL_Client;
 const ServerResource = server.ServerResource;
@@ -119,7 +119,7 @@ pub fn main() std.mem.Allocator.Error!void {
     try pollfds.append(posix.pollfd{ .fd = http_sock.sock, .events = posix.POLL.IN, .revents = 0 });
     client_poll_offset += 1;
 
-    var db = DB.init("db.sqlite") catch |err| {
+    var db = Database.init("db.sqlite") catch |err| {
         log.err("Failed to initialize Database with Error({s})", .{@errorName(err)});
         return;
     };
@@ -155,7 +155,7 @@ pub fn main() std.mem.Allocator.Error!void {
     var clients_data = std.ArrayList(ClientData).init(gpa);
     defer clients_data.deinit();
 
-    const www = comptime http.gen_resources(structure.www);
+    var http_server_data = http.ServerData.init(structure.www);
 
     inline for (structure.modules) |mod| {
         if (std.meta.hasFn(mod, "init")) {
@@ -242,8 +242,8 @@ pub fn main() std.mem.Allocator.Error!void {
                                 client_data,
                                 gpa,
                                 &config,
-                                www,
-                                db,
+                                &http_server_data,
+                                &db,
                             ) catch |err| {
                                 client_data.is_open = false;
                                 log.info("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
@@ -256,8 +256,8 @@ pub fn main() std.mem.Allocator.Error!void {
                                 client_data,
                                 gpa,
                                 &config,
-                                www,
-                                db,
+                                &http_server_data,
+                                &db,
                             ) catch |err| {
                                 client_data.is_open = false;
                                 log.info("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
@@ -367,9 +367,9 @@ fn handle_http_data(
     _: *ClientData,
     gpa: std.mem.Allocator,
     config: *const Config,
-    www: http.Directory,
-    db: DB,
-) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || http.Request.ParseError || std.mem.Allocator.Error)!void {
+    http_server_data: *http.ServerData,
+    db: *Database,
+) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || http.Request.ParseError || std.mem.Allocator.Error || Database.sqlite.Error)!void {
     const reader = client.reader();
     const writer = client.writer();
 
@@ -377,13 +377,6 @@ fn handle_http_data(
     defer arena_state.deinit();
 
     const arena = arena_state.allocator();
-
-    var res = http.Response.init(gpa) catch |err| {
-        try writer.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
-        log.err("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
-        return;
-    };
-    defer res.deinit();
 
     var req = http.Request.parse(gpa, reader) catch |err| {
         try writer.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
@@ -393,6 +386,14 @@ fn handle_http_data(
 
     log.info("Got Request from Client {d}: {s}", .{ client.sock, req });
 
+    var http_context = http.Context.init(gpa, db, &req);
+
+    //if (http_context.has_session) |_| {} else {
+    //    const max_age_s = 60 * 60 * 24;
+    //    const session_token = try db.new_session(max_age_s, null);
+    //    try res.header("Set-Cookie", try std.fmt.allocPrint(arena, "SESSION_TOKEN={s}; Max-Age={d}; Path=/", .{ session_token.hex(), max_age_s }));
+    //}
+
     if (!std.mem.startsWith(u8, req.path, "/")) {
         const message = "Path needs to start with '/'.";
         try writer.writeAll(std.fmt.comptimePrint("HTTP/1.1 404 Not Found\r\nContent-Length: {d}\r\n\r\n{s}", .{ message.len, message }));
@@ -401,75 +402,53 @@ fn handle_http_data(
 
     const path = req.path[1..];
 
-    blk_handle: {
-        if (http.find_resource(path, www)) |resource| {
+    const res = blk_handle: {
+        if (http_server_data.find_resource(path)) |resource| {
             switch (resource) {
                 .directory => |_| {
-                    res.code = ._404_NOT_FOUND;
-                    _ = try res.write_body("Resource is a directory.");
                     log.debug("Found directory at '{s}'", .{req.path});
+                    break :blk_handle http.Response.not_found();
                 },
                 .file => |content| {
-                    res.code = ._200_OK;
-                    _ = try res.write_body(content);
                     log.debug("Found static file at '{s}'", .{req.path});
+                    break :blk_handle try http.Response.file(arena, http.ContentType.from_filename(path).?, content);
                 },
                 .handler => |*handler| {
                     if (handler.*[@intFromEnum(req.method)]) |callback| {
-                        var context = http.Context{ .db = db, .arena = arena };
-                        callback(&context, &req, &res) catch |err| {
-                            res.code = ._500_INTERNAL_SERVER_ERROR;
-                            _ = try res.write_body("Handler failed.");
+                        if (callback(&http_context, &req)) |res| {
+                            break :blk_handle res;
+                        } else |err| {
                             log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
-                        };
+                            break :blk_handle http.Response.server_error();
+                        }
                     } else {
-                        res.code = ._404_NOT_FOUND;
-                        _ = try res.write_body("Resource is null handler.");
                         log.debug("Found null callback at '{s}'", .{req.path});
+                        break :blk_handle http.Response.not_found();
                     }
                 },
             }
         } else if (config.data_dir) |data_dir| {
             var dir = std.fs.cwd().openDir(data_dir, .{}) catch |err| {
-                res.code = ._404_NOT_FOUND;
-                _ = try res.write_body("No resource found.");
                 log.info("Could not open data dir with Error({s})", .{@errorName(err)});
-                break :blk_handle;
+                break :blk_handle http.Response.not_found();
             };
             defer dir.close();
 
             const file = dir.openFile(path, .{}) catch |err| {
-                res.code = ._404_NOT_FOUND;
-                _ = try res.write_body("No resource found.");
                 log.info("Could not open file at path '{s}' with Error({s})", .{ path, @errorName(err) });
-                break :blk_handle;
+                break :blk_handle http.Response.not_found();
             };
             defer file.close();
 
-            res.code = ._200_OK;
-
-            var buffer: [1024]u8 = undefined;
-            var read_len = file.read(&buffer) catch |err| {
-                res.code = ._404_NOT_FOUND;
-                _ = try res.write_body("No resource found.");
-                log.info("Could not read from file at path '{s}' with Error({s})", .{ path, @errorName(err) });
-                break :blk_handle;
+            const content = file.readToEndAlloc(arena, 1024 * 256) catch |err| {
+                log.err("Could not read file at path '{s}' with Error({s})", .{ path, @errorName(err) });
+                break :blk_handle http.Response.server_error();
             };
-            while (read_len > 0) {
-                _ = try res.write_body(buffer[0..read_len]);
-                read_len = file.read(&buffer) catch |err| {
-                    res.body_len = 0;
-                    res.code = ._404_NOT_FOUND;
-                    _ = try res.write_body("No resource found.");
-                    log.info("Could not read from file at path '{s}' with Error({s})", .{ path, @errorName(err) });
-                    break :blk_handle;
-                };
-            }
+            break :blk_handle try http.Response.file(arena, http.ContentType.from_filename(path).?, content);
         } else {
-            res.code = ._404_NOT_FOUND;
-            _ = try res.write_body("No resource found.");
+            break :blk_handle http.Response.not_found();
         }
-    }
+    };
 
-    try res.output_to(writer);
+    try std.fmt.format(writer, "{}", .{res});
 }

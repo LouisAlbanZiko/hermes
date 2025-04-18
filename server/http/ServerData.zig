@@ -1,30 +1,27 @@
 const std = @import("std");
-const http = @import("http");
-const util = @import("util");
-const DB = @import("DB.zig");
-const ServerResource = @import("ServerResource.zig");
+const Request = @import("Request.zig");
+const Response = @import("Response.zig");
+const Method = @import("protocol.zig").Method;
+const ServerResource = @import("../ServerResource.zig");
+const Context = @import("Context.zig");
 
-pub const Request = http.Request;
-pub const Response = http.Response;
+root_dir: Directory,
+pub fn init(comptime resources: []const ServerResource) @This() {
+    return .{
+        .root_dir = comptime gen_resources(resources),
+    };
+}
 
-pub const Context = struct {
-    arena: std.mem.Allocator,
-    db: DB,
-    pub fn template(_: *Context, writer: anytype, comptime content: []const u8, values: anytype) @TypeOf(writer).Error!void {
-        try util.template(writer, content, values);
-    }
-};
-
-pub const Callback = *const fn (*Context, *const http.Request, *http.Response) std.mem.Allocator.Error!void;
+pub const Callback = *const fn (*Context, *const Request) std.mem.Allocator.Error!Response;
 pub const ResourceType = ServerResource.Type;
 pub const Directory = std.StaticStringMap(Resource);
 pub const Resource = union(ResourceType) {
     directory: Directory,
-    handler: [@typeInfo(http.Request.Method).@"enum".fields.len]?Callback,
+    handler: [@typeInfo(Method).@"enum".fields.len]?Callback,
     file: []const u8,
 };
 
-pub fn gen_resources(resources: []const ServerResource) Directory {
+pub fn gen_resources(comptime resources: []const ServerResource) Directory {
     var values: [resources.len]struct { []const u8, Resource } = undefined;
 
     inline for (resources, 0..) |resource, index| {
@@ -33,8 +30,8 @@ pub fn gen_resources(resources: []const ServerResource) Directory {
                 values[index] = .{ resource.path, .{ .directory = gen_resources(d) } };
             },
             .handler => |t| {
-                var callbacks: [@typeInfo(http.Method).@"enum".fields.len]?Callback = undefined;
-                inline for (@typeInfo(http.Method).@"enum".fields) |field| {
+                var callbacks: [@typeInfo(Method).@"enum".fields.len]?Callback = undefined;
+                inline for (@typeInfo(Method).@"enum".fields) |field| {
                     const fn_name = "http_" ++ field.name;
                     if (std.meta.hasFn(t, fn_name)) {
                         callbacks[field.value] = @field(t, fn_name);
@@ -53,10 +50,10 @@ pub fn gen_resources(resources: []const ServerResource) Directory {
     return Directory.initComptime(values);
 }
 
-pub fn find_resource(path: []const u8, root_dir: Directory) ?Resource {
+pub fn find_resource(self: *@This(), path: []const u8) ?Resource {
     var path_iter = std.mem.splitScalar(u8, path, '/');
 
-    var dir = root_dir;
+    var dir = self.root_dir;
     var current_path: []const u8 = path_iter.next() orelse "index";
     if (current_path.len == 0) {
         current_path = "index";
