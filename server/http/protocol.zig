@@ -45,6 +45,7 @@ pub const ContentType = enum {
     @"image/png",
     @"image/tiff",
     @"image/vnd.microsoft.icon",
+    @"image/svg+xml",
 
     @"text/css",
     @"text/csv",
@@ -75,6 +76,8 @@ pub const ContentType = enum {
             return .@"image/png";
         } else if (std.mem.eql(u8, extension, ".tiff")) {
             return .@"image/tiff";
+        } else if (std.mem.eql(u8, extension, ".svg")) {
+            return .@"image/svg+xml";
         } else if (std.mem.eql(u8, extension, ".ico")) {
             return .@"image/vnd.microsoft.icon";
         } else if (std.mem.eql(u8, extension, ".pdf")) {
