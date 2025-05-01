@@ -5,3 +5,4 @@ pub const IP = @import("IP.zig");
 pub const http = @import("http/root.zig");
 pub const SSL_Context = @import("SSL.zig");
 pub const Config = @import("Config.zig");
+pub const util = @import("util");
