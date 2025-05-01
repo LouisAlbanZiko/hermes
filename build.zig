@@ -10,19 +10,11 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const mod_sqlite = b.addModule("sqlite", .{
-        .root_source_file = b.path("sqlite/sqlite.zig"),
-        .link_libc = true,
-        .target = target,
-        .optimize = optimize,
-    });
-    mod_sqlite.addCSourceFile(.{ .file = b.path("sqlite/sqlite3.c"), .flags = &.{"-std=c99"} });
-    mod_sqlite.addIncludePath(b.path("sqlite"));
-
     const mod_util = b.addModule("util", .{
         .root_source_file = b.path("util/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     mod_util.addCSourceFile(.{ .file = b.path("util/time_fmt.c"), .flags = &.{"-std=c99"} });
     mod_util.addIncludePath(b.path("util"));
@@ -33,7 +25,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     mod_server.addImport("util", mod_util);
-    mod_server.addImport("sqlite", mod_sqlite);
 
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();

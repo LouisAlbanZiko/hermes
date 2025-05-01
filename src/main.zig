@@ -7,7 +7,6 @@ const server = @import("server");
 const util = @import("util");
 
 const http = server.http;
-const Database = server.Database;
 const TCP_Client = server.TCP_Client;
 const SSL_Client = server.SSL_Client;
 const ServerResource = server.ServerResource;
@@ -119,12 +118,6 @@ pub fn main() std.mem.Allocator.Error!void {
     try pollfds.append(posix.pollfd{ .fd = http_sock.sock, .events = posix.POLL.IN, .revents = 0 });
     client_poll_offset += 1;
 
-    var db = Database.init("db.sqlite") catch |err| {
-        log.err("Failed to initialize Database with Error({s})", .{@errorName(err)});
-        return;
-    };
-    defer db.deinit();
-
     const ssl_public_crt = try gpa.dupeZ(u8, config.https.cert);
     defer gpa.free(ssl_public_crt);
     const ssl_private_key = try gpa.dupeZ(u8, config.https.key);
@@ -159,7 +152,7 @@ pub fn main() std.mem.Allocator.Error!void {
 
     inline for (structure.modules) |mod| {
         if (std.meta.hasFn(mod, "init")) {
-            mod.init(gpa, &db) catch |err| {
+            mod.init(gpa) catch |err| {
                 log.err("Failed to initialize module with Error({s})", .{@errorName(err)});
                 return;
             };
@@ -243,7 +236,6 @@ pub fn main() std.mem.Allocator.Error!void {
                                 gpa,
                                 &config,
                                 &http_server_data,
-                                &db,
                             ) catch |err| {
                                 client_data.is_open = false;
                                 log.info("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
@@ -257,7 +249,6 @@ pub fn main() std.mem.Allocator.Error!void {
                                 gpa,
                                 &config,
                                 &http_server_data,
-                                &db,
                             ) catch |err| {
                                 client_data.is_open = false;
                                 log.info("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
@@ -368,8 +359,7 @@ fn handle_http_data(
     gpa: std.mem.Allocator,
     config: *const Config,
     http_server_data: *http.ServerData,
-    db: *Database,
-) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || http.Request.ParseError || std.mem.Allocator.Error || Database.sqlite.Error)!void {
+) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || http.Request.ParseError || std.mem.Allocator.Error)!void {
     const reader = client.reader();
     const writer = client.writer();
 
@@ -386,14 +376,6 @@ fn handle_http_data(
 
     log.info("Got Request from Client {d}: {s}", .{ client.sock, req });
 
-    var http_context = http.Context.init(gpa, db, &req);
-
-    //if (http_context.has_session) |_| {} else {
-    //    const max_age_s = 60 * 60 * 24;
-    //    const session_token = try db.new_session(max_age_s, null);
-    //    try res.header("Set-Cookie", try std.fmt.allocPrint(arena, "SESSION_TOKEN={s}; Max-Age={d}; Path=/", .{ session_token.hex(), max_age_s }));
-    //}
-
     if (!std.mem.startsWith(u8, req.path, "/")) {
         const message = "Path needs to start with '/'.";
         try writer.writeAll(std.fmt.comptimePrint("HTTP/1.1 404 Not Found\r\nContent-Length: {d}\r\n\r\n{s}", .{ message.len, message }));
@@ -401,7 +383,6 @@ fn handle_http_data(
     }
 
     const path = req.path[1..];
-
     const res = blk_handle: {
         if (http_server_data.find_resource(path)) |resource| {
             switch (resource) {
@@ -415,7 +396,7 @@ fn handle_http_data(
                 },
                 .handler => |*handler| {
                     if (handler.*[@intFromEnum(req.method)]) |callback| {
-                        if (callback(&http_context, &req)) |res| {
+                        if (callback(arena, &req)) |res| {
                             break :blk_handle res;
                         } else |err| {
                             log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });

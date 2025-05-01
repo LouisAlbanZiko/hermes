@@ -10,5 +10,4 @@ pub const Header = protocol.Header;
 pub const Request = @import("Request.zig");
 pub const Response = @import("Response.zig");
 
-pub const Context = @import("Context.zig");
 pub const ServerData = @import("ServerData.zig");
