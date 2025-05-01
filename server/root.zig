@@ -1,5 +1,4 @@
 pub const ServerResource = @import("ServerResource.zig");
-pub const Database = @import("Database.zig");
 pub const TCP_Client = @import("TCP_Client.zig");
 pub const SSL_Client = @import("SSL_Client.zig");
 pub const IP = @import("IP.zig");

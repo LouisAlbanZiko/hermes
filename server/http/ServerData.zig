@@ -3,7 +3,6 @@ const Request = @import("Request.zig");
 const Response = @import("Response.zig");
 const Method = @import("protocol.zig").Method;
 const ServerResource = @import("../ServerResource.zig");
-const Context = @import("Context.zig");
 
 root_dir: Directory,
 pub fn init(comptime resources: []const ServerResource) @This() {
@@ -12,7 +11,7 @@ pub fn init(comptime resources: []const ServerResource) @This() {
     };
 }
 
-pub const Callback = *const fn (*Context, *const Request) std.mem.Allocator.Error!Response;
+pub const Callback = *const fn (std.mem.Allocator, *const Request) std.mem.Allocator.Error!Response;
 pub const ResourceType = ServerResource.Type;
 pub const Directory = std.StaticStringMap(Resource);
 pub const Resource = union(ResourceType) {

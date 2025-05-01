@@ -3,8 +3,8 @@ const std = @import("std");
 const server = @import("server");
 const http = server.http;
 
-pub fn http_GET(ctx: *http.Context, req: *const http.Request) std.mem.Allocator.Error!http.Response {
-    var body = std.ArrayList(u8).init(ctx.arena());
+pub fn http_GET(arena: std.mem.Allocator, req: *const http.Request) std.mem.Allocator.Error!http.Response {
+    var body = std.ArrayList(u8).init(arena);
     try std.fmt.format(
         body.writer(),
         \\<p>VERSION: '{s}'</p>
@@ -32,7 +32,7 @@ pub fn http_GET(ctx: *http.Context, req: *const http.Request) std.mem.Allocator.
     }
     _ = try body.writer().write("</ul>");
 
-    var headers = try ctx.arena().alloc(http.Response.Header, 1);
+    var headers = try arena.alloc(http.Header, 1);
     headers[0] = .{ "Content-Type", @tagName(.@"text/html") };
 
     return http.Response{

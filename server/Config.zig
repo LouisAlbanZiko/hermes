@@ -3,32 +3,20 @@ const std = @import("std");
 const log = std.log.scoped(.CONFIG);
 
 const Config = @This();
-client_timeout_s: usize,
-poll_timeout_s: usize,
-data_dir: ?[]const u8,
+client_timeout_s: usize = 60,
+poll_timeout_s: usize = 25,
+data_dir: ?[]const u8 = null,
 http: struct {
-    port: u16,
-},
+    port: u16 = 8080,
+} = .{},
 https: struct {
-    port: u16,
-    cert: []const u8,
-    key: []const u8,
-},
+    port: u16 = 8443,
+    cert: []const u8 = "localhost.crt",
+    key: []const u8 = "localhost.key",
+} = .{},
 
 pub fn default() Config {
-    return Config{
-        .client_timeout_s = 60,
-        .poll_timeout_s = 25,
-        .data_dir = null,
-        .http = .{
-            .port = 80,
-        },
-        .https = .{
-            .port = 443,
-            .cert = "localhost.crt",
-            .key = "localhost.key",
-        },
-    };
+    return Config{};
 }
 
 pub fn load(arena: std.mem.Allocator, path: []const u8) Config {
