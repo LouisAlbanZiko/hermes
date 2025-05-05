@@ -19,11 +19,11 @@ Routing is done based on the file structure under `www`. Let's say you have the 
         - index.zig
         - index.html.template
 
-`about.zig` -> is a handler, the code in it will be compiled and will be called when the path `/about` is requested
-`index.zig` -> is the same as `about.zig` except that it will be exposed on two paths: `/index` and `/`
-`favicon.ico` -> is a static file, it will be embedded into the executable and exposed on the path `/favicon.ico`
-`home/index.zig` -> is that as `index.zig` except that the paths for it will be `/home` and `/home/index`
-`home/index.html.template` -> is a template, it will be ignored by the routing. The intended use for it is to be included by `home/index.zig` using `@embedFile("index.html.template")` and used as a template
+- `about.zig` -> is a handler, the code in it will be compiled and will be called when the path `/about` is requested
+- `index.zig` -> is the same as `about.zig` except that it will be exposed on two paths: `/index` and `/`
+- `favicon.ico` -> is a static file, it will be embedded into the executable and exposed on the path `/favicon.ico`
+- `home/index.zig` -> is the same as `index.zig` except that the paths for it will be `/home` and `/home/index`
+- `home/index.html.template` -> is a template, it will be ignored by the routing. The intended use for it is to be included by `home/index.zig` using `@embedFile("index.html.template")` and used as a template
 
 ### Dependencies
 - Zig 0.14 for building
