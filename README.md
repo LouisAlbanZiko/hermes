@@ -1,6 +1,6 @@
-# HTTP Server
+# Hermes WebServer
 
-An HTTP server written in Zig for serving static files and simple templates as well as basic custom functionality using `handlers`.
+Hermes is an HTTP server written in Zig for serving static files and simple templates as well as basic custom functionality using `handlers`.
 All files (static files, templates) are embedded into the executable at compile time.
 
 ### How it works
@@ -31,9 +31,9 @@ Routing is done based on the file structure under `www`. Let's say you have the 
 
 ### Simple Usage
 The easiest way to use the server is to clone the repository and modify the contents of `example_www` directory.
-- Clone the repository and checkout to 1.0 branch
+- Clone the repository
 ```
-git clone --single-branch --branch 1.0 https://github.com/LouisAlbanZiko/http_server.git
+git clone https://github.com/LouisAlbanZiko/hermes.git
 ```
 - Modify the files under `example_www`
 - Build and run the project
@@ -46,7 +46,7 @@ To import into your own Zig project you will need to first add the server as a d
 I would suggest adding the server as a git submodule and importing it like so:
 ```
 .dependencies = .{
-    .http_server = .{
+    .hermes = .{
         .path = "<path to submodule>",
     },
 },
@@ -83,7 +83,7 @@ Try to build and run the project:
 zig build run
 ```
 
-If everything is setup correctly and you have added at least one file to the `www` directory you should be able to open it on the browser.
+If everything is setup correctly and you have added at least one file to the `www` directory you should be able to access it from the browser.
 
 ### Plans for 2.0
 I plan to add certain features to the server and release it as a 2.0 version:
