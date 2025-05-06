@@ -58,18 +58,18 @@ Next you will need to update your `build.zig` script and pass the correct option
 const target = b.standardTargetOptions(.{});
 const optimize = b.standardOptimizeOption(.{});
 
-const http_server = b.dependency("http_server", .{
+const hermes = b.dependency("hermes", .{
     .target = target,
     .optimize = optimize,
     .web_dir = b.path("www"),
     .exe_name = "<name of executable>",
 });
-b.getInstallStep().dependOn(http_server.builder.getInstallStep());
+b.getInstallStep().dependOn(hermes.builder.getInstallStep());
 ```
 
 The server comes with an executable artifact which you can use:
 ```
-const exe = http_server.artifact(exe_name);
+const exe = hermes.artifact(exe_name);
 b.installArtifact(exe);
 
 const run_exe = b.addRunArtifact(exe);
