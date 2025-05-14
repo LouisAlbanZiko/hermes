@@ -11,3 +11,4 @@ pub const Request = @import("Request.zig");
 pub const Response = @import("Response.zig");
 
 pub const ServerData = @import("ServerData.zig");
+pub const Context = ServerData.Context;

@@ -384,9 +384,12 @@ fn handle_http_data(
 
     const path = req.path[1..];
     const res = blk_handle: {
-        if (http_server_data.find_resource(path)) |resource| {
+        if (http_server_data.root_dir.find_resource(path)) |resource_tuple| {
+            const resource = resource_tuple.@"1";
+            const current_dir = resource_tuple.@"0";
             switch (resource) {
                 .directory => |_| {
+                    // add index lookup
                     log.debug("Found directory at '{s}'", .{req.path});
                     break :blk_handle http.Response.not_found();
                 },
@@ -396,7 +399,12 @@ fn handle_http_data(
                 },
                 .handler => |*handler| {
                     if (handler.*[@intFromEnum(req.method)]) |callback| {
-                        if (callback(arena, &req)) |res| {
+                        const ctx = http.Context{
+                            .arena = arena,
+                            .root_dir = http_server_data.root_dir,
+                            .current_dir = current_dir,
+                        };
+                        if (callback(ctx, &req)) |res| {
                             break :blk_handle res;
                         } else |err| {
                             log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
