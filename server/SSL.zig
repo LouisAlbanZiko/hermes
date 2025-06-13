@@ -56,6 +56,6 @@ pub fn client_new(self: *SSL_Context, client_sock: c_int) !SSL_Client {
     return SSL_Client{ .ssl = ssl, .sock = client_sock };
 }
 
-pub fn client_free(_: *SSL_Context, client: SSL_Client) void {
+pub fn client_free(_: *const SSL_Context, client: SSL_Client) void {
     openssl.SSL_free(client.ssl);
 }

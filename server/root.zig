@@ -6,3 +6,7 @@ pub const http = @import("http/root.zig");
 pub const SSL_Context = @import("SSL.zig");
 pub const Config = @import("Config.zig");
 pub const util = @import("util");
+pub const Client = @import("Client.zig");
+pub const ClientData = @import("ClientData.zig");
+pub const Protocol = ClientData.Protocol;
+pub const ProtocolData = ClientData.ProtocolData;

@@ -6,31 +6,16 @@ const options = @import("options");
 const server = @import("server");
 const util = @import("util");
 
-const http = server.http;
 const TCP_Client = server.TCP_Client;
 const SSL_Client = server.SSL_Client;
+const Client = server.Client;
+const ClientData = server.ClientData;
+const Protocol = server.Protocol;
+
+const http = server.http;
 const ServerResource = server.ServerResource;
 const SSL_Context = server.SSL_Context;
 const Config = server.Config;
-
-const Protocol = enum { http, tls, https };
-const ProtocolData = union(Protocol) {
-    http: struct {
-        client: TCP_Client,
-    },
-    tls: struct {
-        client: SSL_Client,
-    },
-    https: struct {
-        client: SSL_Client,
-    },
-};
-const ClientData = struct {
-    is_open: bool,
-    last_commms: i128,
-    ip: server.IP,
-    protocol: ProtocolData,
-};
 
 const log = std.log.scoped(.SERVER);
 
@@ -148,8 +133,6 @@ pub fn main() std.mem.Allocator.Error!void {
     var clients_data = std.ArrayList(ClientData).init(gpa);
     defer clients_data.deinit();
 
-    var http_server_data = http.ServerData.init(structure.www);
-
     inline for (structure.modules) |mod| {
         if (std.meta.hasFn(mod, "init")) {
             mod.init(gpa) catch |err| {
@@ -185,7 +168,8 @@ pub fn main() std.mem.Allocator.Error!void {
                         .is_open = true,
                         .last_commms = std.time.nanoTimestamp() - server_start,
                         .ip = .{ .v4 = @bitCast(addr.addr) },
-                        .protocol = ProtocolData{ .http = .{ .client = .{ .sock = client_sock } } },
+                        .protocol = .{ .http = .{} },
+                        .client = .{ .id = client_sock, .value = .{ .tcp = TCP_Client{.sock = client_sock} } },
                     });
 
                     log.info("ACCEPTED HTTP Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
@@ -213,7 +197,8 @@ pub fn main() std.mem.Allocator.Error!void {
                         .is_open = true,
                         .last_commms = std.time.nanoTimestamp() - server_start,
                         .ip = .{ .v4 = @bitCast(addr.addr) },
-                        .protocol = ProtocolData{ .tls = .{ .client = ssl_client } },
+                        .protocol = .{ .tls = .{} },
+                        .client = .{ .id = client_sock, .value = .{ .ssl = ssl_client } },
                     });
 
                     log.info("ACCEPTED TLS Client({d}) with IP({})", .{ client_sock, clients_data.getLast().ip });
@@ -228,41 +213,30 @@ pub fn main() std.mem.Allocator.Error!void {
                 if (pollfd.revents & posix.POLL.IN != 0) {
                     var client_data = &clients_data.items[poll_index - client_poll_offset];
                     switch (clients_data.items[poll_index - client_poll_offset].protocol) {
-                        .http => |*http_data| {
-                            const client = http_data.client;
-                            handle_http_data(
-                                client,
+                        .http => |_| {
+                            http.handle_client(
+                                client_data.client,
                                 client_data,
                                 gpa,
-                                &config,
-                                &http_server_data,
+                                structure.www,
                             ) catch |err| {
                                 client_data.is_open = false;
-                                log.info("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
+                                log.info("CLOSING {d}. Reason: Error({s})", .{ client_data.client.id, @errorName(err) });
                             };
                         },
-                        .https => |*https_data| {
-                            const client = https_data.client;
-                            handle_http_data(
-                                client,
-                                client_data,
-                                gpa,
-                                &config,
-                                &http_server_data,
-                            ) catch |err| {
-                                client_data.is_open = false;
-                                log.info("CLOSING {d}. Reason: Error({s})", .{ client.sock, @errorName(err) });
-                            };
-                        },
-                        .tls => |*tls_data| {
-                            if (tls_data.client.accept_step()) |is_accepted| {
+                        .tls => |_| {
+                            const ssl_client = client_data.client.value.ssl;
+                            if (ssl_client.accept_step()) |is_accepted| {
                                 if (is_accepted) {
-                                    clients_data.items[poll_index - client_poll_offset].protocol = .{ .https = .{ .client = tls_data.client } };
+                                    clients_data.items[poll_index - client_poll_offset].protocol = .{ .http = .{} };
                                 }
                             } else |err| {
                                 log.err("CLOSING {d}. Reason: SSL handshake failed with Error({s})", .{ pollfd.fd, @errorName(err) });
                                 clients_data.items[poll_index - client_poll_offset].is_open = false;
                             }
+                        },
+                        .ws => |_| {
+                            unreachable;
                         },
                     }
                     clients_data.items[poll_index - client_poll_offset].last_commms = std.time.nanoTimestamp() - server_start;
@@ -290,16 +264,15 @@ pub fn main() std.mem.Allocator.Error!void {
                 } else {
                     const poll_index = client_index + client_poll_offset;
                     posix.close(pollfds.items[poll_index].fd);
-                    switch (clients_data.items[client_index].protocol) {
-                        .https => |*https_data| {
-                            const https = &(has_https orelse unreachable);
-                            https.ssl.client_free(https_data.client);
+                    switch (clients_data.items[client_index].client.value) {
+                        .ssl => |ssl_client| {
+                            if (has_https) |https| {
+                                https.ssl.client_free(ssl_client);
+                            } else {
+                                unreachable;
+                            }
                         },
-                        .tls => |*tls_data| {
-                            const https = &(has_https orelse unreachable);
-                            https.ssl.client_free(tls_data.client);
-                        },
-                        .http => |_| {},
+                        .tcp => |_| {},
                     }
                     const pollfd = pollfds.swapRemove(poll_index);
                     _ = clients_data.swapRemove(client_index);
@@ -353,91 +326,3 @@ fn open_server_sock(port: u16, prot: Protocol) !ServerSock {
     };
 }
 
-fn handle_http_data(
-    client: anytype,
-    _: *ClientData,
-    gpa: std.mem.Allocator,
-    config: *const Config,
-    http_server_data: *http.ServerData,
-) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || http.Request.ParseError || std.mem.Allocator.Error)!void {
-    const reader = client.reader();
-    const writer = client.writer();
-
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
-    defer arena_state.deinit();
-
-    const arena = arena_state.allocator();
-
-    var req = http.Request.parse(gpa, reader) catch |err| {
-        try writer.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
-        return err;
-    };
-    defer req.deinit();
-
-    log.info("Got Request from Client {d}: {s}", .{ client.sock, req });
-
-    if (!std.mem.startsWith(u8, req.path, "/")) {
-        const message = "Path needs to start with '/'.";
-        try writer.writeAll(std.fmt.comptimePrint("HTTP/1.1 404 Not Found\r\nContent-Length: {d}\r\n\r\n{s}", .{ message.len, message }));
-        return;
-    }
-
-    const path = req.path[1..];
-    const res = blk_handle: {
-        if (http_server_data.root_dir.find_resource(path)) |resource_tuple| {
-            const resource = resource_tuple.@"1";
-            const current_dir = resource_tuple.@"0";
-            switch (resource) {
-                .directory => |_| {
-                    // add index lookup
-                    log.debug("Found directory at '{s}'", .{req.path});
-                    break :blk_handle http.Response.not_found();
-                },
-                .file => |content| {
-                    log.debug("Found static file at '{s}'", .{req.path});
-                    break :blk_handle try http.Response.file(arena, http.ContentType.from_filename(path).?, content);
-                },
-                .handler => |*handler| {
-                    if (handler.*[@intFromEnum(req.method)]) |callback| {
-                        const ctx = http.Context{
-                            .arena = arena,
-                            .root_dir = http_server_data.root_dir,
-                            .current_dir = current_dir,
-                        };
-                        if (callback(ctx, &req)) |res| {
-                            break :blk_handle res;
-                        } else |err| {
-                            log.err("Callback on path '{s}' failed with Error({s})", .{ req.path, @errorName(err) });
-                            break :blk_handle http.Response.server_error();
-                        }
-                    } else {
-                        log.debug("Found null callback at '{s}'", .{req.path});
-                        break :blk_handle http.Response.not_found();
-                    }
-                },
-            }
-        } else if (config.data_dir) |data_dir| {
-            var dir = std.fs.cwd().openDir(data_dir, .{}) catch |err| {
-                log.info("Could not open data dir with Error({s})", .{@errorName(err)});
-                break :blk_handle http.Response.not_found();
-            };
-            defer dir.close();
-
-            const file = dir.openFile(path, .{}) catch |err| {
-                log.info("Could not open file at path '{s}' with Error({s})", .{ path, @errorName(err) });
-                break :blk_handle http.Response.not_found();
-            };
-            defer file.close();
-
-            const content = file.readToEndAlloc(arena, 1024 * 256) catch |err| {
-                log.err("Could not read file at path '{s}' with Error({s})", .{ path, @errorName(err) });
-                break :blk_handle http.Response.server_error();
-            };
-            break :blk_handle try http.Response.file(arena, http.ContentType.from_filename(path).?, content);
-        } else {
-            break :blk_handle http.Response.not_found();
-        }
-    };
-
-    try std.fmt.format(writer, "{}", .{res});
-}
