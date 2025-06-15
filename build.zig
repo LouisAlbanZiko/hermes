@@ -26,6 +26,21 @@ pub fn build(b: *std.Build) !void {
     });
     mod_server.addImport("util", mod_util);
 
+    const builtin = @import("builtin");
+    switch (builtin.os.tag) {
+        .windows => {
+            mod_server.addLibraryPath(std.Build.LazyPath{.cwd_relative = "C:/Src/openssl-3.5.0/"});
+            mod_server.linkSystemLibrary("libssl-3-x64", .{});
+            mod_server.addSystemIncludePath(std.Build.LazyPath{.cwd_relative = "C:/Src/openssl-3.5.0/include/"});
+        },
+        .linux => {
+            mod_server.linkSystemLibrary("ssl", .{});
+        },
+        else => {
+            @compileError(std.fmt.comptimePrint("Unimplemented os {s}", .{@tagName(builtin.os.tag)}));
+        },
+    }
+
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
@@ -147,8 +162,6 @@ pub fn build(b: *std.Build) !void {
     mod_exe.addImport("structure", mod_structure);
     mod_exe.addImport("util", mod_util);
     mod_exe.addOptions("options", options);
-
-    mod_exe.linkSystemLibrary("ssl", .{});
 
     const exe = b.addExecutable(.{
         .name = EXE_NAME,

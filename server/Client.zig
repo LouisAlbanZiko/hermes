@@ -4,7 +4,7 @@ const SSL_Client = @import("SSL_Client.zig");
 
 const ClientType = enum { tcp, ssl };
 const Client = @This();
-id: i32,
+id: std.posix.socket_t,
 value: union(ClientType) {
     tcp: TCP_Client,
     ssl: SSL_Client,

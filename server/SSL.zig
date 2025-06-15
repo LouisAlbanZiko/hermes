@@ -42,14 +42,17 @@ pub const ClientInitError = error{
     SSL_new_Failed,
     SSL_set_fd_Failed,
 };
-pub fn client_new(self: *SSL_Context, client_sock: c_int) !SSL_Client {
+pub fn client_new(self: *SSL_Context, client_sock: std.posix.socket_t) !SSL_Client {
     const ssl = openssl.SSL_new(self.ssl_ctx);
     if (ssl == null) {
         log.err("Failed to create SSL Client.", .{});
         return ClientInitError.SSL_new_Failed;
     }
     errdefer openssl.SSL_free(ssl);
-    if (openssl.SSL_set_fd(ssl, client_sock) <= 0) {
+
+    const builtin = @import("builtin");
+    const sock32bit: c_int = if (builtin.os.tag == .windows) @intCast(@intFromPtr(client_sock)) else client_sock;
+    if (openssl.SSL_set_fd(ssl, sock32bit) <= 0) {
         log.err("Failed to set fd of SSL_Client", .{});
         return ClientInitError.SSL_set_fd_Failed;
     }

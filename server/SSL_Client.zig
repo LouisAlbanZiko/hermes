@@ -5,7 +5,7 @@ const openssl = @cImport({
 
 const SSL_Client = @This();
 ssl: ?*openssl.SSL,
-sock: i32,
+sock: std.posix.socket_t,
 
 pub const ReadError = error{SSL_Read_Error};
 pub fn read(self: SSL_Client, buffer: []u8) ReadError!usize {

@@ -285,8 +285,8 @@ pub fn main() std.mem.Allocator.Error!void {
 
 const ServerSock = struct {
     port: u16,
-    sock: i32,
     prot: Protocol,
+    sock: posix.socket_t,
 };
 
 fn open_server_sock(port: u16, prot: Protocol) !ServerSock {
