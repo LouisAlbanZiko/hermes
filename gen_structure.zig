@@ -136,11 +136,11 @@ const BuildResource = struct {
                 if (std.mem.endsWith(u8, full_path, ".zig")) {
                     resource_type = "handler";
                     function = "import";
-                    name = self.path[0 .. self.path.len - ".zig".len];
+                    name = self.path[1 .. self.path.len - ".zig".len];
                 } else {
                     resource_type = "file";
                     function = "embedFile";
-                    name = self.path;
+                    name = self.path[1..];
                 }
                 try std.fmt.format(
                     writer,
@@ -154,7 +154,7 @@ const BuildResource = struct {
                     writer,
                     \\.{{.path="{s}",.value=.{{.directory=&[_]ServerResource{{
                 ,
-                    .{self.path},
+                    .{self.path[1..]},
                 );
                 for (dir.items) |br| {
                     try br.write_zig(writer);
