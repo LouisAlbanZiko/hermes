@@ -88,6 +88,12 @@ pub fn main() std.mem.Allocator.Error!void {
     var server_socks = std.ArrayList(ServerSock).init(gpa);
     defer server_socks.deinit();
 
+    const priv_dir = http.PrivDirectory.init(gpa, structure.www) catch |err| {
+        log.err("Failed to create private directory with Error({s})", .{@errorName(err)});
+        return;
+    };
+    defer priv_dir.deinit(gpa);
+
     var pollfds = std.ArrayList(posix.pollfd).init(gpa);
     defer {
         for (pollfds.items) |pollfd| {
@@ -219,6 +225,7 @@ pub fn main() std.mem.Allocator.Error!void {
                                 client_data,
                                 gpa,
                                 structure.www,
+                                priv_dir,
                             ) catch |err| {
                                 client_data.is_open = false;
                                 log.info("CLOSING {d}. Reason: Error({s})", .{ client_data.client.id, @errorName(err) });

@@ -39,7 +39,7 @@ pub fn main() !void {
         log.debug("Generating path '{s}'", .{path});
 
         var current_dir = &root_dir;
-        var iter = std.mem.splitScalar(u8, path, std.fs.path.sep);
+        var iter = std.mem.splitScalar(u8, path, '/');
         if (iter.peek()) |first| {
             if (first.len == 0) {
                 _ = iter.next();
@@ -136,11 +136,15 @@ const BuildResource = struct {
                 if (std.mem.endsWith(u8, full_path, ".zig")) {
                     resource_type = "handler";
                     function = "import";
-                    name = self.path[1 .. self.path.len - ".zig".len];
+                    name = self.path[0 .. self.path.len - ".zig".len];
+                } else if (std.mem.endsWith(u8, full_path, ".priv")) {
+                    resource_type = "priv";
+                    function = "embedFile";
+                    name = self.path[0 .. self.path.len - ".priv".len];
                 } else {
                     resource_type = "file";
                     function = "embedFile";
-                    name = self.path[1..];
+                    name = self.path;
                 }
                 try std.fmt.format(
                     writer,
@@ -154,7 +158,7 @@ const BuildResource = struct {
                     writer,
                     \\.{{.path="{s}",.value=.{{.directory=&[_]ServerResource{{
                 ,
-                    .{self.path[1..]},
+                    .{self.path},
                 );
                 for (dir.items) |br| {
                     try br.write_zig(writer);

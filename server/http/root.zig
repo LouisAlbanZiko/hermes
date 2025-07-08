@@ -14,8 +14,99 @@ const ServerResource = @import("../ServerResource.zig");
 const ClientData = @import("../ClientData.zig");
 const Client = @import("../Client.zig");
 
+pub const PrivResourceType = enum { directory, file };
+pub const PrivResource = struct {
+    path: []const u8,
+    value: union(PrivResourceType) {
+        directory: PrivDirectory,
+        file: [:0]const u8,
+    },
+};
+pub const PrivDirectory = struct {
+    resources: []const PrivResource,
+    pub fn init(gpa: std.mem.Allocator, comptime www: []const ServerResource) !PrivDirectory {
+        var resources: []PrivResource = try gpa.alloc(PrivResource, count_priv(www));
+        var res_index: usize = 0;
+        inline for (www) |res| {
+            switch (res.value) {
+                .priv => |content| {
+                    resources[res_index] = PrivResource{ .path = res.path, .value = .{ .file = content } };
+                    res_index += 1;
+                },
+                .directory => |dir| {
+                    resources[res_index] = PrivResource{ .path = res.path, .value = .{ .directory = try init(gpa, dir)} };
+                    res_index += 1;
+                },
+                else => {},
+            }
+        }
+        return .{ .resources = resources };
+    }
+    pub fn deinit(self: PrivDirectory, gpa: std.mem.Allocator) void {
+        for (self.resources) |res| {
+            switch (res.value) {
+                .directory => |dir| {
+                    dir.deinit(gpa);
+                },
+                else => {},
+            }
+        }
+        gpa.free(self.resources);
+    }
+    pub fn lookup(self: PrivDirectory, path: []const u8) ?PrivResource {
+        var path_iter = std.mem.splitScalar(u8, path, '/');
+        const current = path_iter.next() orelse "";
+        std.debug.print("\\\\ current={s}\n", .{current});
+        for (self.resources) |res| {
+            std.debug.print("\\\\ checking={s}\n", .{res.path});
+            if (std.mem.eql(u8, current, res.path)) {
+                std.debug.print("\\\\ found={s}\n", .{res.path});
+                switch (res.value) {
+                    .file => |_| {
+                        if (path_iter.peek()) |next| {
+                            std.debug.print("found file, next is '{s}'\n", .{next});
+                            return null;
+                        } else {
+                            std.debug.print("found file\n", .{});
+                            return res;
+                        }
+                    },
+                    .directory => |dir| {
+                        if (path_iter.peek()) |next| {
+                            std.debug.print("Found dir, next is '{s}'\n", .{next});
+                            return dir.lookup(path_iter.rest());
+                        } else {
+                            std.debug.print("Found dir but no next\n", .{});
+                            //return null;
+                            return res;
+                        }
+                    },
+                }
+            }
+        }
+        unreachable;
+    }
+};
+
+fn count_priv(comptime www: []const ServerResource) usize {
+    var count: usize = 0;
+    inline for (www) |res| {
+        switch (res.value) {
+            .priv => {
+                count += 1;
+            },
+            .directory => {
+                count += 1;
+            },
+            else => {},
+        }
+    } 
+    return count;
+}
+
 pub const Context = struct {
     arena: std.mem.Allocator,
+    resources: PrivDirectory,
 };
 
 pub fn handle_client(
@@ -23,6 +114,7 @@ pub fn handle_client(
     _: *ClientData,
     gpa: std.mem.Allocator,
     comptime www: []const ServerResource,
+    priv_dir: PrivDirectory,
 ) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || Request.ParseError || std.mem.Allocator.Error)!void {
     const log = std.log.scoped(.HTTP);
 
@@ -50,6 +142,7 @@ pub fn handle_client(
 
     const ctx = Context{
         .arena = arena,
+        .resources = priv_dir,
     };
     const path = req.path[1..];
     const res = try handle_dir(ctx, &req, path, www);
@@ -76,6 +169,9 @@ pub fn handle_dir(ctx: Context, req: *const Request, path: []const u8, comptime 
                     } else {
                         return Response.not_found();
                     }
+                },
+                .priv => |_| {
+                    return Response.not_found();
                 },
                 .handler => |mod| {
                     switch (req.method) {
