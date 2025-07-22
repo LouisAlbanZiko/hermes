@@ -141,6 +141,9 @@ const BuildResource = struct {
                     resource_type = "priv";
                     function = "embedFile";
                     name = self.path[0 .. self.path.len - ".priv".len];
+                } else if (std.mem.endsWith(u8, full_path, ".ignore")) {
+                    // skip
+                    return;
                 } else {
                     resource_type = "file";
                     function = "embedFile";
