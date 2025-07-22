@@ -116,7 +116,7 @@ pub fn handle_client(
     comptime www: []const ServerResource,
     priv_dir: PrivDirectory,
 ) (@TypeOf(client).ReadError || @TypeOf(client).WriteError || Request.ParseError || std.mem.Allocator.Error)!void {
-    const log = std.log.scoped(.HTTP);
+    //const log = std.log.scoped(.HTTP);
 
     const reader = client.reader();
     const writer = client.writer();
@@ -132,7 +132,7 @@ pub fn handle_client(
     };
     defer req.deinit();
 
-    log.info("Got Request from Client {}: {s}", .{ client, req });
+    //log.info("Got Request from Client {}: {s}", .{ client, req });
 
     if (!std.mem.startsWith(u8, req.path, "/")) {
         const message = "Path needs to start with '/'.";
