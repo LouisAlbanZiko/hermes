@@ -200,17 +200,19 @@ fn gen_modules(
         const current_name = try std.fmt.allocPrint(build_info.allocator, "{s}/{s}", .{ import_path, entry.name });
         switch (entry.kind) {
             .file => {
-                const module_path = try std.fmt.allocPrint(build_info.allocator, "{s}{s}", .{ build_info.dir_path.src_path.sub_path, current_name });
-                const mod = build_info.b.addModule(current_name, .{
-                    .root_source_file = build_info.dir_path.src_path.owner.path(module_path),
-                    .target = build_info.target,
-                    .optimize = build_info.optimize,
-                });
-                try modules.append(.{
-                    .name = current_name,
-                    .mod = mod,
-                });
-                log.info("Added module at '{s}'.", .{current_name});
+                if (std.mem.endsWith(u8, entry.name, ".zig")) {
+                    const module_path = try std.fmt.allocPrint(build_info.allocator, "{s}{s}", .{ build_info.dir_path.src_path.sub_path, current_name });
+                    const mod = build_info.b.addModule(current_name, .{
+                        .root_source_file = build_info.dir_path.src_path.owner.path(module_path),
+                        .target = build_info.target,
+                        .optimize = build_info.optimize,
+                    });
+                    try modules.append(.{
+                        .name = current_name,
+                        .mod = mod,
+                    });
+                    log.info("Added module at '{s}'.", .{current_name});
+                }
             },
             .directory => {
                 const child_import_path = current_name;
