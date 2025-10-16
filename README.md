@@ -84,13 +84,3 @@ zig build run
 ```
 
 If everything is setup correctly and you have added at least one file to the `www` directory you should be able to access it from the browser.
-
-### Plans for 2.0
-I plan to add certain features to the server and release it as a 2.0 version:
-- WebSockets
-- SMTP
-- Database support (probably Sqlite)
-- Builtin Sessions and Users
-
-However, I want to take a break from this project and come back to it at a later time.
-
