@@ -23,7 +23,11 @@ fn custom_log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_liter
     if (options.optimize == .Debug) {
         output_log(std.io.getStdOut().writer(), level, scope, format, args) catch @panic("Failed to log!");
     } else {
-        const file = std.fs.openFileAbsolute("/var/log/" ++ options.exe_name ++ ".log", .{ .mode = .write_only }) catch |err| {
+        const logdir = std.fs.openDirAbsolute("/var/log/" ++ options.exe_name ++ "/", .{}) catch |err| {
+            std.debug.print("Failed to open log directory with Error({s})\n", .{@errorName(err)});
+            return;
+        };
+        const file = logdir.openFile(@tagName(scope), .{ .mode = .write_only }) catch |err| {
             std.debug.print("Failed to open log file with Error({s})\n", .{@errorName(err)});
             return;
         };
@@ -33,7 +37,7 @@ fn custom_log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_liter
         };
         defer file.close();
         output_log(file.writer(), level, scope, format, args) catch |err| {
-            std.debug.print("Failed to output to lof file with Error({s})\n", .{@errorName(err)});
+            std.debug.print("Failed to output to log file with Error({s})\n", .{@errorName(err)});
             return;
         };
     }
@@ -47,7 +51,7 @@ fn output_log(writer: anytype, comptime level: std.log.Level, comptime scope: @T
         const timestamp_len = util.timestamp_to_iso8601(std.time.microTimestamp(), &time_buffer, time_buffer.len);
         time_buffer[timestamp_len] = 0;
         
-        try std.fmt.format(writer, "[{s}][{s}] {s}: ", .{ time_buffer[0..timestamp_len :0], @tagName(scope), @tagName(level) });
+        try std.fmt.format(writer, "[{s}] {s}: ", .{ time_buffer[0..timestamp_len :0], @tagName(level) });
         try std.fmt.format(writer, format, args);
         try writer.writeAll("\n");
     }
