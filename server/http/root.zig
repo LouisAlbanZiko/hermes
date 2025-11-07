@@ -111,7 +111,7 @@ pub const Context = struct {
 
 pub fn handle_client(
     client: Client,
-    _: *ClientData,
+    client_data: *ClientData,
     gpa: std.mem.Allocator,
     comptime www: []const ServerResource,
     priv_dir: PrivDirectory,
@@ -148,6 +148,13 @@ pub fn handle_client(
     const res = try handle_dir(ctx, &req, path, www);
 
     try std.fmt.format(writer, "{}", .{res});
+
+    const clf = std.log.scoped(.CLF);
+    const util = @import("util");
+    var time_buffer: [128:0]u8 = undefined;
+    const timestamp_len = util.timestamp_to_iso8601(std.time.microTimestamp(), &time_buffer, time_buffer.len);
+    time_buffer[timestamp_len] = 0;
+    clf.info("{} - - [{s}] \"{}\" \"{s}\" {d}", .{client_data.ip, time_buffer[0..timestamp_len :0], req, @tagName(res.code), res.body.len});
 }
 
 pub fn handle_dir(ctx: Context, req: *const Request, path: []const u8, comptime dir: []const ServerResource) std.mem.Allocator.Error!Response {

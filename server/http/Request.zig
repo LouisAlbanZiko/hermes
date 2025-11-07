@@ -206,7 +206,7 @@ pub fn format(
     _: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    try std.fmt.format(writer, "{s} {s}", .{ @tagName(self.method), self.path });
+    try std.fmt.format(writer, "{s} {s} {s}", .{ @tagName(self.method), self.path, @tagName(self.version) });
 }
 
 pub fn enumFromStr(E: type, str: []const u8) ?E {

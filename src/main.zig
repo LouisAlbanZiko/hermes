@@ -39,13 +39,18 @@ fn custom_log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_liter
     }
 }
 fn output_log(writer: anytype, comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) !void {
-    var time_buffer: [128:0]u8 = undefined;
-    const timestamp_len = util.timestamp_to_iso8601(std.time.microTimestamp(), &time_buffer, time_buffer.len);
-    time_buffer[timestamp_len] = 0;
-
-    try std.fmt.format(writer, "[{s}][{s}] {s}: ", .{ time_buffer[0..timestamp_len :0], @tagName(scope), @tagName(level) });
-    try std.fmt.format(writer, format, args);
-    try writer.writeAll("\n");
+    if (scope == .CLF) {
+        try std.fmt.format(writer, format, args);
+        try writer.writeAll("\n");
+    } else {
+        var time_buffer: [128:0]u8 = undefined;
+        const timestamp_len = util.timestamp_to_iso8601(std.time.microTimestamp(), &time_buffer, time_buffer.len);
+        time_buffer[timestamp_len] = 0;
+        
+        try std.fmt.format(writer, "[{s}][{s}] {s}: ", .{ time_buffer[0..timestamp_len :0], @tagName(scope), @tagName(level) });
+        try std.fmt.format(writer, format, args);
+        try writer.writeAll("\n");
+    }
 }
 pub const std_options: std.Options = .{
     .log_level = blk: {
