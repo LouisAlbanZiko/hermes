@@ -54,10 +54,15 @@ pub const ContentType = enum {
     @"text/plain",
     @"text/xml",
 
+    @"font/woff",
+    @"font/woff2",
+
     pub fn from_filename(filename: []const u8) ?ContentType {
         const extension = std.fs.path.extension(filename);
         if (std.mem.eql(u8, extension, ".css")) {
             return .@"text/css";
+        } else if (std.mem.eql(u8, extension, ".json")) {
+            return .@"application/json";
         } else if (std.mem.eql(u8, extension, ".csv")) {
             return .@"text/csv";
         } else if (std.mem.eql(u8, extension, ".html")) {
@@ -84,6 +89,10 @@ pub const ContentType = enum {
             return .@"application/pdf";
         } else if (std.mem.eql(u8, extension, ".zip")) {
             return .@"application/zip";
+        } else if (std.mem.eql(u8, extension, ".woff")) {
+            return .@"font/woff";
+        } else if (std.mem.eql(u8, extension, ".woff2")) {
+            return .@"font/woff2";
         } else {
             return null;
         }
