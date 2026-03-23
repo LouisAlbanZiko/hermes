@@ -20,27 +20,27 @@ const Config = server.Config;
 const log = std.log.scoped(.SERVER);
 
 fn custom_log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
-    if (options.optimize == .Debug) {
-        output_log(std.io.getStdOut().writer(), level, scope, format, args) catch @panic("Failed to log!");
-    } else {
-        const logdir = std.fs.openDirAbsolute("/var/log/" ++ options.exe_name ++ "/", .{}) catch |err| {
-            std.debug.print("Failed to open log directory with Error({s})\n", .{@errorName(err)});
-            return;
-        };
-        const file = logdir.openFile(@tagName(scope), .{ .mode = .write_only }) catch |err| {
-            std.debug.print("Failed to open log file with Error({s})\n", .{@errorName(err)});
-            return;
-        };
-        file.seekFromEnd(0) catch |err| {
-            std.debug.print("Failed to seek to end of file with Error({s})\n", .{@errorName(err)});
-            return;
-        };
-        defer file.close();
-        output_log(file.writer(), level, scope, format, args) catch |err| {
-            std.debug.print("Failed to output to log file with Error({s})\n", .{@errorName(err)});
-            return;
-        };
-    }
+    output_log(std.io.getStdOut().writer(), level, scope, format, args) catch @panic("Failed to log!");
+    //if (options.optimize == .Debug) {
+    //} else {
+    //    const logdir = std.fs.openDirAbsolute("/var/log/" ++ options.exe_name ++ "/", .{}) catch {
+    //        output_log(std.io.getStdErr().writer(), level, scope, format, args) catch unreachable;
+    //        return;
+    //    };
+    //    const file = logdir.openFile(@tagName(scope), .{ .mode = .write_only }) catch |err| {
+    //        std.debug.print("Failed to open log file with Error({s})\n", .{@errorName(err)});
+    //        return;
+    //    };
+    //    file.seekFromEnd(0) catch |err| {
+    //        std.debug.print("Failed to seek to end of file with Error({s})\n", .{@errorName(err)});
+    //        return;
+    //    };
+    //    defer file.close();
+    //    output_log(file.writer(), level, scope, format, args) catch |err| {
+    //        std.debug.print("Failed to output to log file with Error({s})\n", .{@errorName(err)});
+    //        return;
+    //    };
+    //}
 }
 fn output_log(writer: anytype, comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) !void {
     if (scope == .CLF) {
